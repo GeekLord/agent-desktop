@@ -32,6 +32,7 @@ pub enum PropertyValue {
     Text(String),
     Flag(bool),
     Number(i32),
+    Real(f64),
     Bounds(Rect),
 }
 
@@ -73,6 +74,13 @@ impl PropertyOutcome {
     pub fn number(&self) -> Option<i32> {
         match self {
             Self::Known(PropertyValue::Number(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn real(&self) -> Option<f64> {
+        match self {
+            Self::Known(PropertyValue::Real(value)) => Some(*value),
             _ => None,
         }
     }

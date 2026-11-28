@@ -27,7 +27,7 @@ pub(super) fn text_write(policy: crate::InteractionPolicy) -> String {
     }
 }
 
-const CELL_SUGGESTION: &str = "This cell is not directly editable. Activate it, take a fresh snapshot, and target the text editor if one appears.";
+pub(super) const CELL_SUGGESTION: &str = "This cell is not directly editable. Click it, then take a fresh snapshot and target the text editor inside the cell. If the cell shows no editor, the first click only selected it: click it again.";
 
 const SET_FOCUS_SUGGESTION: &str = "Choose an element advertising SetFocus in a fresh snapshot. To focus the owning window instead, use focus-window.";
 

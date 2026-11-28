@@ -350,10 +350,7 @@ mod tests {
 
         assert_eq!(
             error.suggestion.as_deref(),
-            Some(
-                "This cell is not directly editable. Activate it, take a fresh snapshot, and \
-                 target the text editor if one appears."
-            )
+            Some(crate::actionability::suggestion::CELL_SUGGESTION)
         );
         assert!(!error.suggestion.unwrap().contains("it exposes"));
     }

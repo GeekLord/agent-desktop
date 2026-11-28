@@ -119,8 +119,8 @@ fn realize_verdict(outcome: Result<(), UiaFailure>) -> Result<(), AdapterError> 
 #[cfg(target_os = "windows")]
 mod imp {
     use super::{
-        AdapterError, Deadline, Realization, UIAElement, accept_unique_lookup, lookup_answer,
-        lookup_verdict, realize_verdict,
+        AdapterError, Deadline, Realization, UIAElement, accept_unique_lookup, after_delivery,
+        lookup_answer, lookup_verdict, realize_verdict,
     };
     use crate::actions::chain::poll_until;
     use crate::actions::select_search::{accept_selection_match, selection_item_available};
@@ -201,6 +201,10 @@ mod imp {
         };
         wait_until_on_screen(deadline, || {
             read_one(&item, TreeProperty::IsOffscreen).flag() == Some(false)
+        })
+        .map_err(|error| match realization {
+            Realization::Sent => after_delivery(error),
+            Realization::AlreadyBuilt => error,
         })?;
         if selection_item_available(&item) {
             return Ok(Some((item, realization)));

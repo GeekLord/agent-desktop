@@ -29,13 +29,16 @@ pub(crate) struct DispatchedAction {
 pub(crate) fn read_surfaces_after_release(
     adapter: &dyn PlatformAdapter,
     after_release: AfterRelease,
+    raised_by: &NativeHandle,
     deadline: crate::Deadline,
     result: &mut ActionResult,
 ) {
     let surfaces_of = after_release.surfaces_of;
     let read_overlays = |result: &mut ActionResult| {
         if let Some(process) = surfaces_of {
-            result.surfaces = adapter.list_surfaces(process, deadline).unwrap_or_default();
+            result.surfaces = adapter
+                .surfaces_raised_by(process, raised_by, deadline)
+                .unwrap_or_default();
         }
     };
     let Some(front) = after_release.front else {

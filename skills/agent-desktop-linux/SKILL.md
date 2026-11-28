@@ -40,6 +40,13 @@ use a private session and runtime directory for isolated work.
   Chromium, Qt, and unknown-toolkit refs must be unique in the window or inside
   their nearest unique ancestor. Take fresh refs after list changes; a narrower
   drill does not disambiguate identical twins.
+- A table reports `row_count` and `column_count`, and a large sheet is read by its cells
+  in view. While a window shows a sheet read this way, a ref that carries no native element
+  address is refused: a twin could sit among the cells that were not read. A cell's text is
+  its `value`. Where a spreadsheet names a cell by its
+  address, get it with `find --role cell --name B7 --root '<table ref>'`. `set-value` on an editable
+  cell takes a number; text has no background route and is refused. `click` and `select`
+  on a table cell select it where the table supports that; a GTK3 tree view does not.
 - GTK4 list-backed dropdowns stay in the window tree. Use `wait --text` and
   `snapshot --root` to read their contents, not a menu-surface wait.
   Menu-role popups use the menu surface instead.
@@ -66,16 +73,7 @@ use a private session and runtime directory for isolated work.
   StatusNotifierWatcher. A missing service is an error, not an empty list.
 - Password-role values are withheld, but a field that merely masks its text can
   still be readable. Treat observation output as sensitive.
-- `launch` accepts a program on PATH, an absolute path, an installed desktop id,
-  or an unambiguous desktop entry name. A script launch attaches only to the interpreter
-  process that runs that script, never to another script of the same interpreter. `--no-attach` refuses any running
-  process of the same program (the same executable, or the interpreter running the same script) whatever its
-  arguments. Use process and window identity from
-  observations rather than guessing from a window title. Without `--activate`,
-  a launch on X11 gives the focus and the window order back to the window that
-  had them when a new window took them, and reports `focus_returned: true`, or
-  `false` with a suggestion when it could not. A headless click that opens a
-  dialog is guarded the same way (`details.focus_returned`).
+- `launch` accepts a program on PATH, an absolute path, an installed desktop id, or an unambiguous desktop entry name. A script launch attaches only to the interpreter process that runs that script, never to another script of the same interpreter. `--no-attach` refuses any running process of the same program (the same executable, or the interpreter running the same script) whatever its arguments. Use process and window identity from observations rather than guessing from a window title. Without `--activate`, a launch on X11 gives the focus and the window order back to the window that had them when a new window took them, and reports `focus_returned: true`, or `false` with a suggestion when it could not. A headless click that opens a dialog is guarded the same way (`details.focus_returned`).
 - Sandboxes are not available on Linux yet. To run agent-desktop in a container you manage yourself, see `agent-browser.dev/desktop/guides/docker-container`.
 
 ## Troubleshooting

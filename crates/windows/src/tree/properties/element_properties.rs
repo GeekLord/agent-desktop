@@ -27,7 +27,7 @@ fn withheld(outcome: PropertyOutcome) -> PropertyOutcome {
 /// the `VT_I4` divergence `is_secure`'s doc comment names (`Number`, nonzero
 /// meaning true). `None` for any other `Known` shape, which is not this
 /// provider's divergence and must not be guessed at.
-fn known_as_bool(value: &PropertyValue) -> Option<bool> {
+pub(crate) fn known_as_bool(value: &PropertyValue) -> Option<bool> {
     match value {
         PropertyValue::Flag(value) => Some(*value),
         PropertyValue::Number(value) => Some(*value != 0),
@@ -174,6 +174,17 @@ impl ElementProperties {
         }
     }
 
+    /// A range control's current value behind its pattern gate, as the text
+    /// the other platforms report for a slider: the number without a trailing
+    /// `.0`. A non-finite number is not a value.
+    pub(crate) fn gated_range_text(&self) -> Option<String> {
+        if self.secure || !self.gate_open(TreeProperty::RangeValue) {
+            return None;
+        }
+        let number = self.get(TreeProperty::RangeValue).real()?;
+        number.is_finite().then(|| format!("{number}"))
+    }
+
     pub fn gated_number(&self, property: TreeProperty) -> Option<i32> {
         if !self.gate_open(property) {
             return None;
@@ -247,7 +258,13 @@ impl ElementProperties {
     }
 
     fn value_without_rich_edit_terminator(&self) -> LocatorField<String> {
-        project_value(self.get(TreeProperty::Value).text(), self.is_rich_edit())
+        let read = match self.get(TreeProperty::Value).text() {
+            LocatorField::Absent => self
+                .gated_range_text()
+                .map_or(LocatorField::Absent, LocatorField::Known),
+            other => other,
+        };
+        project_value(read, self.is_rich_edit())
     }
 
     pub(crate) fn is_rich_edit(&self) -> bool {
@@ -255,6 +272,11 @@ impl ElementProperties {
             self.get(TreeProperty::ClassName),
             PropertyOutcome::Known(PropertyValue::Text(class)) if class.to_ascii_lowercase().starts_with("richedit")
         )
+    }
+
+    /// A non-negative count or index behind its pattern gate.
+    pub(crate) fn gated_index(&self, property: TreeProperty) -> Option<u32> {
+        u32::try_from(self.gated_number(property)?).ok()
     }
 
     fn identifier_evidence(&self) -> IdentifierEvidence {

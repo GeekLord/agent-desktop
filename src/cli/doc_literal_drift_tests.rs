@@ -21,6 +21,7 @@ const ABI_DOCS: &[(&str, &str)] = &[
 ];
 
 const FFI_HEADER: &str = include_str!("../../crates/ffi/include/agent_desktop.h");
+const FFI_API_DOCS: &str = include_str!("../../apps/docs/content/docs/ffi/api.mdx");
 const README: &str = include_str!("../../README.md");
 const AGENTS_MD: &str = include_str!("../../AGENTS.md");
 const HELD_INPUT_COMMANDS: &[&str] = &["key-down", "key-up", "mouse-down", "mouse-up"];
@@ -86,6 +87,37 @@ fn documented_abi_major_matches_the_header() {
         for major in found {
             assert_eq!(major, header_major, "{path} documents ABI major {major}");
         }
+    }
+}
+
+fn header_enum_constants(header: &str) -> Vec<(&str, i64)> {
+    header
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.trim().split_once(" = ")?;
+            if !name.starts_with("AD_") {
+                return None;
+            }
+            let value = value.strip_suffix(',')?.parse().ok()?;
+            Some((name, value))
+        })
+        .collect()
+}
+
+#[test]
+fn documented_ffi_enum_constants_match_the_header() {
+    let constants = header_enum_constants(FFI_HEADER);
+    assert!(
+        constants.len() >= 100,
+        "agent_desktop.h parsing found {} enum constants, expected the full set",
+        constants.len()
+    );
+    for (name, value) in constants {
+        let documented = format!("<code>{name}</code> {value}");
+        assert!(
+            FFI_API_DOCS.contains(&documented),
+            "apps/docs/content/docs/ffi/api.mdx must list {documented}"
+        );
     }
 }
 

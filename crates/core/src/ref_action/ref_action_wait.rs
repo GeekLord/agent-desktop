@@ -24,6 +24,7 @@ pub(crate) fn execute_with_auto_wait(
     crate::ref_action::ref_action_dispatched::read_surfaces_after_release(
         context.adapter,
         landing.after_release,
+        &landing.handle,
         landing.deadline,
         &mut result,
     );
