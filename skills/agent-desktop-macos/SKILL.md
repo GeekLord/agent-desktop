@@ -42,15 +42,20 @@ may report `unknown` when consent would require a prompt.
 - `menu` and `menubar` observations are application-owned and can omit `data.window`.
   An app without an ordinary window may still expose process-owned surfaces.
   Inspect `supported_surfaces` rather than assuming every surface exists.
+- `press --app` headless: `return` and `escape` run as accessibility actions on the focused element. Any other key needs a focused element in the
+  app (`ACTION_FAILED`, `details.check: process_focus`, `not_delivered` otherwise). A modifier shortcut never runs a menu item: `click` the item.
 - `agent-desktop press escape --app <app>` closes an open menu or popover with its
   cancel action when no focused element takes Escape, and reads that it closed;
   with `--window-id <id>` it closes the surface that window or the app shows. A
   popover can appear a moment after the click that opens it: read it with
   `snapshot --app <app> --surface popover`.
+- `list-surfaces` lists the sheets, dialogs and popovers of every window, not only
+  the focused one. A system service panel, such as AirDrop from a share, is a dialog.
 - Headless menu-opening and dialog-opening actions can refuse before delivery.
   A label ending in an ellipsis predicts a dialog; it does not prove one exists.
-  Stop on a headed-only refusal rather than changing mode.
-- Headless `restore` of a minimized window and headless `minimize` of the focused window refuse with `POLICY_DENIED`; the system raises or moves focus. Stop on that refusal.
+  A click on a button inside a popover refuses with `kind: popover_command`: a
+  share item starts a service whose window takes the front. Stop on a headed-only
+  refusal rather than changing mode. Headless `restore` of a minimized window and headless `minimize` of the focused window refuse with `POLICY_DENIED`; the system raises or moves focus.
 - A file-name text field is not a file-system rename interface. Value-write
   actions refuse it because a changed field could falsely imply a renamed file.
 - A tab button (`AXRadioButton`, subrole `AXTabButton`) is selected by press
@@ -75,8 +80,7 @@ may report `unknown` when consent would require a prompt.
   cell editor no keyboard input from a press always takes that failure; type there
   with `--headed` only if the user explicitly asked for that. The write also commits
   an edit that is open in another cell.
-- AX success alone does not prove an application effect. Verify the task's
-  result independently, especially after a menu action or a value write.
+- AX success alone does not prove an application effect. Verify the result independently, especially after a menu action or value write.
 
 ## Troubleshooting
 
@@ -93,3 +97,4 @@ Read the disposition before applying a fix. Match both the code and message.
 | `PERM_DENIED`: `private file parent is accessible by group or other users` | The state root is not private. Run `chmod 700 "${AGENT_DESKTOP_HOME:-$HOME/.agent-desktop}"`, or use a new state root and let the tool create it. |
 | `PERM_DENIED`: `private file parent is not owned by the effective user` | The directory belongs to another user. Point `AGENT_DESKTOP_HOME` at a new directory under your home and let the tool create it; do not take over someone else's state. |
 | `needs_setup` from `sandbox status` for a sandbox that worked before | The guest agent, `agent-desktop-guest`, is not running in the guest, or Accessibility is off for it. Run `sandbox stop <name>`, then `sandbox start <name> --window`. In the guest, turn on automatic login, run `sh "/Volumes/My Shared Files/guest-setup.sh"` in Terminal, and switch on **agent-desktop-guest** in System Settings > Privacy & Security > Accessibility. Then check `status` on the host. A sandbox set up by agent-desktop 1.3.0 needs this once. |
+| `ACTION_NOT_SUPPORTED`: `The packaged macOS clipboard helper is missing or invalid` | Every clipboard command runs the packaged `agent-desktop-macos-helper` beside the binary, and it is checked before launch: a regular file (not a symlink) owned by you, executable, one link, no group or world write, no ACL that lets someone else change it, under directories owned by you or root that are not group or world writable unless sticky. `details.kind` is `clipboard_helper_invalid` or `clipboard_helper_not_found`, and `platform_detail` names the failed rule. Repair the install; the clipboard is not empty. |

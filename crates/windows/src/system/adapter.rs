@@ -1,7 +1,7 @@
 use agent_desktop_core::{
     ActionResult, AdapterError, AdapterSession, AppInfo, Deadline, DeliverySemantics,
-    DismissAllNotificationsRequest, DismissNotificationRequest, DisplayInfo, FrontView,
-    FrontWindow, ImageBuffer, InteractionLease, InteractionPolicy, KeyCombo,
+    DismissAllNotificationsRequest, DismissNotificationRequest, DisplayInfo, FrontProcess,
+    FrontView, FrontWindow, ImageBuffer, InteractionLease, InteractionPolicy, KeyCombo,
     NotificationActionRequest, NotificationFilter, NotificationInfo, ObservationOps,
     OperationReport, PermissionReport, ProcessIdentity, ScreenshotTarget, SessionAffinity,
     SignalBaseline, SignalFilter, SnapshotSurface, SurfaceOpening, SystemOps, WindowFilter,
@@ -9,8 +9,7 @@ use agent_desktop_core::{
     system::process_state::ProcessState,
 };
 
-use crate::{adapter::WindowsAdapter, system::escape_popup};
-
+use crate::{adapter::WindowsAdapter, system::escape_popup, system::window::window_front};
 #[cfg(target_os = "windows")]
 #[path = "tcp_listener.rs"]
 pub(crate) mod tcp_listener;
@@ -113,6 +112,7 @@ impl SystemOps for WindowsAdapter {
             SnapshotSurface::Focused,
             SnapshotSurface::Sheet,
             SnapshotSurface::Menu,
+            SnapshotSurface::Popover,
             SnapshotSurface::StartMenu,
             SnapshotSurface::Taskbar,
             SnapshotSurface::SystemTray,
@@ -196,15 +196,15 @@ impl SystemOps for WindowsAdapter {
     }
 
     fn read_front(&self, deadline: Deadline) -> Result<FrontView, AdapterError> {
-        crate::system::window::window_front::read_front(deadline)
+        window_front::read_front(deadline)
     }
 
-    fn front_process(&self, pid: u32) -> Option<agent_desktop_core::FrontProcess> {
-        crate::system::window::window_front::front_process(pid)
+    fn front_process(&self, pid: u32) -> Option<FrontProcess> {
+        window_front::front_process(pid)
     }
 
     fn spawned_descendants(&self, root: u32, since_ms: u64) -> Option<Vec<u32>> {
-        crate::system::window::window_front::spawned_descendants(root, since_ms)
+        window_front::spawned_descendants(root, since_ms)
     }
 
     fn keep_below(
@@ -213,11 +213,11 @@ impl SystemOps for WindowsAdapter {
         above: &FrontWindow,
         _lease: &InteractionLease,
     ) -> Result<(), AdapterError> {
-        crate::system::window::window_front::keep_below(window, above)
+        window_front::keep_below(window, above)
     }
 
     fn give_back(&self, win: &FrontWindow, lease: &InteractionLease) -> Result<(), AdapterError> {
-        crate::system::window::window_front::give_back(win, lease)
+        window_front::give_back(win, lease)
     }
 
     fn window_op(

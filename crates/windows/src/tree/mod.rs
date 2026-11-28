@@ -8,6 +8,8 @@ pub(crate) mod live_read;
 pub(crate) mod minimized;
 pub mod name_evidence;
 pub(crate) mod observe;
+pub(crate) mod popover_choice;
+pub(crate) mod popover_inventory;
 pub(crate) mod resolve;
 pub mod roles;
 pub mod states;

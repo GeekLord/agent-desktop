@@ -70,8 +70,8 @@ agent-desktop get '@s8f3k2p9:e4' --property value
 agent-desktop close-app "<app>"                # a save prompt keeps the app open; see --force below
 ```
 
-If an action reports `data.surfaces`, inspect the overlay before acting on the
-window behind it. A menu, sheet, or alert needs its own surface observation.
+If an action reports `data.surfaces`, inspect the overlay before acting on the window behind it. A menu, sheet, or alert needs its own surface observation.
+`data.details.surfaces: "not_read"` means that read failed, so run `list-surfaces` before assuming no overlay opened.
 Attached selector waits usually observe the parent window, not a separate popup.
 A gone match cannot prove that popup closed, and matching text elsewhere can satisfy an appearance wait.
 Use `launch` with a program name or path accepted by the platform. A running
@@ -88,8 +88,8 @@ Request `--cdp` only for the step that needs it. `close-app` ends the exposure. 
   and exit 0 can include failures. Read each entry's `ok`, even with `--stop-on-error`,
   which stops later steps after a failure.
 - Lifecycle verification: put an action immediately before its event `wait` in the same
-  batch so the baseline is captured before the action. A standalone event wait starts
-  its baseline when it observes and can miss an already-completed transition.
+  batch so the baseline is captured before the action; a later event wait can miss an
+  already-completed transition. A surface a click opens late is a state: `wait --surface <kind> --app <app>`.
 - Targeting: use `find` when the role or name is known; explore a large window with
   a skeleton snapshot and a `--root` drill.
 - Tables: a table node reports `row_count` and `column_count`; a skeleton keeps it as one
@@ -106,6 +106,13 @@ Request `--cdp` only for the step that needs it. `close-app` ends the exposure. 
   `--agent-id` per agent on its commands; this does not change session or ref ownership.
 - Review afterwards: sessions trace by default; inspect the session with `trace show`
   or make a self-contained viewer with `trace export`.
+- Launch takes `--arg <value>` (repeatable; `--arg=-x` for a leading `-`), `--env KEY=VALUE` (no repeated key) and `--cwd <dir>`.
+  `wait --window <title>` needs part of the title; with none, put `wait --event window-opened --app "<app>"` after the opener in one batch.
+- `--stdin` keeps a trailing newline in the value. Send exact text with `printf '%s' "<text>"`; PowerShell appends a line ending to piped strings.
+- Saving into a folder: a Save panel's name field takes a file name, not a path (macOS shows `/` as `:`). Pick the folder with the
+  Where pop-up, which needs headed mode, so ask first. Check the file on disk. `--trace PATH` needs a private file you own,
+  and on Windows a private folder too (one that grants `Users` write is refused).
+- `press --app` reaches a background app only where the platform can: macOS for `return`, `escape` or an app with a focused element; Windows and Linux need the target in front (`ACTION_FAILED`, `not_delivered`).
 - Secrets: run secret steps as separate `--stdin` commands, not batch JSON `text` or
   `value` fields, which expose secrets in process arguments. `--stdin` omits observed
   `value` fields from results; it does not redact later observations or screenshots.
@@ -163,14 +170,7 @@ Names are 1–32 lowercase letters, digits or hyphens, starting with a letter or
 
 Read `state`, `message` and optional `next`; `ok: true` alone does not mean the sandbox is ready.
 
-- `unavailable`: satisfy the host requirements in `message` and `next`.
-- `missing`: install the provider.
-- `ready`: create a sandbox.
-- `working`: repeat the command in `next` until the work finishes.
-- `needs_setup`: have a person complete guest setup, then check status.
-- `running`: run guest commands, or stop before removal.
-- `stopped`: start the sandbox to use it, or remove it.
-- `broken`: follow `next`; a broken sandbox may need removal.
+- `unavailable`: meet `message`. `missing`: install. `ready`: create. `working`: repeat `next`. `needs_setup`: a person completes guest setup. `running`: exec, or stop before `rm`. `stopped`: start or remove. `broken`: follow `next`.
 
 A sandbox separates the desktop, not the network or the host. Sandboxes on one host share a virtual network, and a guest can reach the host's network services; keep one trust level per host. The host reaches the guest over the virtual machine's own socket device: only the process that runs the VM can open that connection, and `agent-desktop-guest` refuses any caller that is not the host. The host sends commands only to the agent whose key it recorded at setup, so another guest account cannot answer in its place. The agent runs the guest's `agent-desktop` with the arguments after `--` and never a shell. In the guest, Accessibility belongs to `agent-desktop-guest`.
 

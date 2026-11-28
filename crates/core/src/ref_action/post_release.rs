@@ -28,16 +28,15 @@ impl PostRelease {
         let surfaces_of = self.surfaces_of;
         let witness = self.witness;
         let work = move || {
-            let mut result = match witness {
+            let result = match witness {
                 Some(witness) => witness.settle(adapter, landed_on, deadline, result),
                 None => result,
             };
-            if let Some(process) = surfaces_of {
-                result.surfaces = adapter
-                    .surfaces_raised_by(process, landed_on, deadline)
-                    .unwrap_or_default();
+            match surfaces_of {
+                Some(process) => result
+                    .with_surfaces_read(adapter.surfaces_raised_by(process, landed_on, deadline)),
+                None => result,
             }
-            result
         };
         let Some(front) = self.front else {
             return work();

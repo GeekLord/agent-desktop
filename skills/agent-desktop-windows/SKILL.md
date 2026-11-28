@@ -26,6 +26,8 @@ Use `agent-desktop permissions` to recheck after the user fixes access.
 
 Quote refs in PowerShell: `'@s8f3k2p9:e1'`. A bare `@token` invokes splatting.
 Use `$env:NAME = 'value'` for environment variables.
+Windows PowerShell 5.1 drops the double quotes in a JSON argument: pass `($json -replace '"','\"')` to `batch`, which has no stdin or file route.
+PowerShell appends a line ending to piped text, so `--stdin` keeps it; use `cmd /c "agent-desktop set-value '<ref>' --stdin < file.txt"` for exact text.
 
 ## Platform behavior
 
@@ -47,20 +49,22 @@ Use `$env:NAME = 'value'` for environment variables.
   button: then the innermost one is collapsed (`ExpandCollapsePattern.Collapse`),
   `delivered_verified` once read back closed. A tree item is never collapsed.
   `collapse` of an open combo box or menu item works headless, and reports `not_delivered` when it is already closed.
-- A grid reports `row_count` and `column_count`. A row is a record: find it by its own
-  name, and its cells through it. `agent-desktop click` on a grid cell that lists `Click`
-  selects the row that holds it. A cell carries no grid position.
+- `press --app` or `--window-id` works headless only when that process owns the foreground window. Otherwise it sends nothing and returns
+  `ACTION_FAILED` (`details.check: process_focus`, `not_delivered`). There is no background key route.
+- `--trace PATH`: the file's folder must exist and have a private DACL (you, SYSTEM, Administrators). A folder that grants `Users` write gives `INVALID_ARGS`.
+- A grid reports `row_count` and `column_count`. A row is a record: find it by its own name, and its cells through it. `agent-desktop click` on a grid cell that lists `Click` selects the row that holds it. A cell carries no grid position.
 - A field whose text is longer than 2048 characters cannot be read: `get` returns `ACTION_FAILED` with `details.kind: "value_exceeds_read_limit"` and the length. Do not retry it. `clear`, `set-value`, `focus` and `click` on its ref still work.
 - `agent-desktop launch` takes an absolute executable path or a bare program name in the
   Windows or System32 directory, not an arbitrary display name or a PATH search.
   Without `--activate` the process starts with a show-window hint that asks for no
-  activation. A window that opens and takes the foreground or the top of the
-  window order is sent back below the window that had it, the foreground is
-  returned, and the result reports `focus_returned: true`, or `false` with a
-  suggestion when it could not be. A window you switched to is never touched.
-- Chromium/Electron trees can be thin while accessibility settles. Finish a
-  bounded observation before concluding that content is absent.
-- An open application menu is the `menu` surface; there is no `menubar` surface.
+  activation. A window that takes the foreground or the top of the window order is
+  sent back below the window that had it, and the result reports `focus_returned: true`,
+  or `false` with a suggestion. A window you switched to is never touched.
+- Chromium/Electron trees can be thin while accessibility settles. Finish a bounded observation before concluding content is absent.
+- An open application menu is the `menu` surface; there is no `menubar` surface. An owned popup window
+  of the app (a ribbon drop-down) is a `popover`: `list-surfaces` lists it, `snapshot --surface popover` reads it.
+  When several popovers are open, name one with `--app <app> --window-id <its w-id from list-surfaces>`;
+  without a name the read is refused with `AMBIGUOUS_TARGET` rather than reading a different popover.
   Shell surfaces are separate from ordinary window inventory. `quick-settings`
   refuses with `INVALID_ARGS` naming `action-center`.
 - Notification reads adopt an already-open Action Center headless; opening it
@@ -71,7 +75,7 @@ Use `$env:NAME = 'value'` for environment variables.
   1254.2 ms per poll median plus the polling interval; transient toasts can be missed.
 - `agent-desktop cursor-overlay enable` reports `rendered: true` only after renderer acknowledgement.
   It does not move the physical pointer, and headed actions skip its travel animation.
-- Sandboxes are not available on Windows yet. To run agent-desktop in a container you manage yourself, see `agent-browser.dev/desktop/guides/docker-container`.
+- Sandboxes are not available on Windows yet; for your own container see `agent-browser.dev/desktop/guides/docker-container`.
 
 Value verification is not application commit: `delivered_verified` with
 `element_value` confirms only the field. `unavailable` means readback evidence

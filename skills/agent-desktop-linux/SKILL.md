@@ -52,26 +52,24 @@ use a private session and runtime directory for isolated work.
   Menu-role popups use the menu surface instead.
 - Popup and dialog openers can take the foreground and refuse headless.
   Qt combo selection may need pointer input to commit rather than highlight a row.
-  Stop on a headed-only refusal instead of changing mode. Headless `restore` of a minimized window and headless `minimize` of the focused window refuse with `POLICY_DENIED`; the system raises or moves focus. Stop on that refusal.
-- A headless graceful `close-app` reads which window has the focus first. When it cannot (a Wayland session, or an owner it cannot identify), it fails with `POLICY_DENIED` (`details.kind: focus_unreadable`) before any close request is sent. Report it to the user, or use `--force`, which discards unsaved work.
-- A window can precede its content. Wait for the application's observable
-  result; an accepted AT-SPI call or a changed selected value is not proof that
-  dependent handlers ran. Wait for each effect before another click.
+  Stop on a headed-only refusal instead of changing mode. Headless `restore` of a minimized window and headless `minimize` of the focused window refuse with `POLICY_DENIED`; the system raises or moves focus.
+- A headless graceful `close-app` of a native Wayland client returns `ACTION_NOT_SUPPORTED` (`details.cause: wayland_session`). `--force` discards unsaved work.
+  When it cannot read the focused window it fails with `POLICY_DENIED` (`details.kind: focus_unreadable`) before any close request is sent.
+- `press --app` works headless only when the target's window is active. Otherwise it sends nothing and returns `ACTION_FAILED`
+  (`details.check: window_active`), or `STALE_REF` when the window has no process identity.
+- A GTK4 list or grid view has no row nodes, so `select` and `click` cannot pick a row.
+- A window can precede its content. Wait for the application's observable result; an accepted AT-SPI call or a changed
+  selected value does not prove that handlers ran. Wait for each effect before another click.
 - Wayland refuses headed pointer input; window operations can use a mapped
   Xwayland client, but native Wayland windows lack that route.
-- Authorized physical `type` sends a newline as `Return` on X11 too. It refuses a tab and other control characters.
-- Authorized physical `type` on Wayland sends a newline as `Return` and a tab as
-  `Tab`, which can submit a form or move focus instead of inserting literal text.
-- Wayland per-window screenshots are unsupported; display capture uses a portal
-  that can ask for consent. Ask the user before initiating a visible consent flow,
-  and do not retry a pending portal request in a loop.
-- X11 capture depends on compositing: a covered noncomposited window may have
-  no readable pixels, and a composited desktop may not support whole-screen capture.
-  Neither failure authorizes focusing the target.
-- Shell notifications require the supported GNOME service; tray reads require a
-  StatusNotifierWatcher. A missing service is an error, not an empty list.
-- Password-role values are withheld, but a field that merely masks its text can
-  still be readable. Treat observation output as sensitive.
+- Authorized physical `type` sends a newline as `Return` on X11 too and refuses a tab and other control characters.
+  On Wayland it sends a newline as `Return` and a tab as `Tab`, which can submit a form or move focus instead of inserting literal text.
+- Wayland per-window screenshots are unsupported; display capture uses a portal that can ask for consent.
+  Ask the user before a visible consent flow, and do not retry a pending request in a loop.
+- X11 capture depends on compositing: a covered noncomposited window may have no readable pixels, and a
+  composited desktop may not support whole-screen capture. Neither failure authorizes focusing the target.
+- Shell notifications need the supported GNOME service; tray reads need a StatusNotifierWatcher. A missing service is an error.
+- Password-role values are withheld, but a field that only masks its text can be readable. Treat observation output as sensitive.
 - `launch` accepts a program on PATH, an absolute path, an installed desktop id, or an unambiguous desktop entry name. A script launch attaches only to the interpreter process that runs that script, never to another script of the same interpreter. `--no-attach` refuses any running process of the same program (the same executable, or the interpreter running the same script) whatever its arguments. Use process and window identity from observations rather than guessing from a window title. Without `--activate`, a launch on X11 gives the focus and window order back and reports `focus_returned: true`, or `false` with a suggestion; a headless click that opens a dialog is guarded the same way.
 - `press escape --app <app> --window-id <id>` on a background window with a showing native popup closes it only via a dismissal action (or GTK3 combo box `Press`) and reports `delivered_verified` once gone. Web content and buttons without a dismissal action keep the focus refusal; it never collapses a tree row.
 - Sandboxes are not available on Linux yet. To run agent-desktop in a container you manage yourself, see `agent-browser.dev/desktop/guides/docker-container`.
