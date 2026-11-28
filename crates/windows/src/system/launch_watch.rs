@@ -116,8 +116,6 @@ pub(super) fn should_poll_after_first_observation(timeout_ms: u64) -> bool {
     timeout_ms > 0
 }
 
-const START_SLACK_MS: u64 = 1_000;
-
 /// The processes `root` started at or after `since_ms`, directly or through
 /// other processes that are still running. Filtering by start time prevents an
 /// earlier process whose dead parent happened to share a reused PID from being
@@ -128,24 +126,14 @@ pub(super) fn descendants(
     since_ms: u64,
     start_of: impl Fn(u32) -> Option<u64>,
 ) -> Vec<ProcessId> {
-    let mut seen = vec![root];
-    let mut spawned = Vec::new();
-    let mut index = 0;
-    while index < seen.len() {
-        let parent = seen[index];
-        index += 1;
-        for row in rows {
-            if row.parent == parent && !seen.contains(&row.pid) {
-                seen.push(row.pid);
-                if start_of(row.pid.get())
-                    .is_some_and(|started| started + START_SLACK_MS >= since_ms)
-                {
-                    spawned.push(row.pid);
-                }
-            }
-        }
-    }
-    spawned
+    let parents: Vec<(u32, u32)> = rows
+        .iter()
+        .map(|row| (row.pid.get(), row.parent.get()))
+        .collect();
+    agent_desktop_core::spawned_descendants_of(root.get(), since_ms, &parents, start_of)
+        .into_iter()
+        .map(ProcessId::new)
+        .collect()
 }
 
 fn started_ms_of(pid: u32) -> Option<u64> {

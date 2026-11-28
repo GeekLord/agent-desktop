@@ -1,4 +1,4 @@
-use agent_desktop_core::{DeliverySemantics, ErrorCode};
+use agent_desktop_core::{DeliverySemantics, ErrorCode, InteractionPolicy};
 
 use super::super::Request;
 use super::super::fake::{Fake, dialog, window};
@@ -12,6 +12,7 @@ fn request() -> Request<'static> {
         pid: 42,
         instance: Some("t"),
         force: false,
+        policy: InteractionPolicy::headless(),
     }
 }
 
@@ -28,6 +29,11 @@ fn an_open_dialog_is_reported_and_no_close_request_is_sent_to_anything() {
     let error = close(&world, &request()).expect_err("a prompt is open");
     assert_eq!(error.code, ErrorCode::ActionFailed);
     assert_eq!(error.disposition, DeliverySemantics::not_delivered());
+    assert!(
+        error.message.contains("no close request was sent"),
+        "{}",
+        error.message
+    );
     let details = error.details.expect("details");
     assert_eq!(details["cause"], "dialog_pending");
     assert_eq!(details["dialogs"], 1);
@@ -43,6 +49,11 @@ fn a_dialog_that_opens_after_the_request_ends_the_wait_at_once_with_its_title() 
     let error = close(&world, &request()).expect_err("the save prompt appeared");
     assert_eq!(error.code, ErrorCode::ActionFailed);
     assert_eq!(error.disposition, DeliverySemantics::delivered_unverified());
+    assert!(
+        error.message.contains("answered the close request"),
+        "{}",
+        error.message
+    );
     let details = error.details.expect("details");
     assert_eq!(details["cause"], "dialog_pending");
     assert_eq!(details["dialog"], "dialog 99");

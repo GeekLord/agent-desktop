@@ -1,6 +1,6 @@
 use agent_desktop_core::{
-    AdapterError, Deadline, DeliverySemantics, ErrorCode, LaunchArrival, LaunchGuidance, ProcessId,
-    RendererKind, WindowInfo, system::launch_options::LaunchOptions,
+    AdapterError, Deadline, DeliverySemantics, ErrorCode, InteractionLease, LaunchArrival,
+    LaunchGuidance, ProcessId, RendererKind, WindowInfo, system::launch_options::LaunchOptions,
     system::launch_result::LaunchResult,
 };
 #[cfg(test)]
@@ -16,15 +16,40 @@ use super::app_ops::ProcessRow;
 use super::launch_path::{
     child_environment_block, image_file_name, launch_identifier, validate_launch_options,
 };
+#[cfg(target_os = "windows")]
+use super::launch_path::{to_wide, to_wide_str};
 use super::process_identity;
 #[cfg(target_os = "windows")]
 use super::runtime::hresult::win32_last_error;
 
+const STARTF_USESHOWWINDOW: u32 = 0x1;
+const SW_SHOWNOACTIVATE: u16 = 4;
+
+/// The `dwFlags` and `wShowWindow` fields of the child's `STARTUPINFOW`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StartupShow {
+    flags: u32,
+    show: u16,
+}
+
+/// A launch without `--activate` asks for no activation. An application that
+/// ignores the hint is handled by the front guard.
+fn startup_show(activate: bool) -> StartupShow {
+    if activate {
+        return StartupShow { flags: 0, show: 0 };
+    }
+    StartupShow {
+        flags: STARTF_USESHOWWINDOW,
+        show: SW_SHOWNOACTIVATE,
+    }
+}
+
 pub(crate) fn launch_app_impl(
     id: &str,
     options: &LaunchOptions,
-    parent_deadline: Deadline,
+    lease: InteractionLease,
 ) -> Result<LaunchResult, AdapterError> {
+    let parent_deadline = lease.deadline();
     let id = &launch_identifier(id).map_err(before_launch)?;
     validate_launch_options(options).map_err(before_launch)?;
     let deadline = if options.timeout_ms == 0 {
@@ -49,6 +74,7 @@ pub(crate) fn launch_app_impl(
         }),
     };
     let sighting = observe_window(&target, options, deadline)?;
+    drop(lease);
     Ok(spawned_result(id, pid, token, sighting))
 }
 
@@ -197,8 +223,11 @@ fn create_process(
         crate::system::interaction_lease::INTERACTION_LEASE_HANDLE_ENV,
     )
     .map_err(before_launch)?;
+    let show = startup_show(options.activate);
     let startup = STARTUPINFOW {
         cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        dwFlags: show.flags,
+        wShowWindow: show.show,
         ..Default::default()
     };
     let mut information = PROCESS_INFORMATION::default();
@@ -309,33 +338,6 @@ fn quote_arg(value: &str) -> String {
 #[cfg(test)]
 fn environment_block(overrides: &BTreeMap<String, String>) -> Result<Vec<u16>, AdapterError> {
     super::launch_path::environment_block(overrides)
-}
-
-#[cfg(target_os = "windows")]
-fn to_wide(path: &Path) -> Result<Vec<u16>, AdapterError> {
-    use std::os::windows::ffi::OsStrExt;
-    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if wide.contains(&0) {
-        return Err(AdapterError::new(
-            ErrorCode::InvalidArgs,
-            "Launch path contains an interior NUL",
-        ));
-    }
-    wide.push(0);
-    Ok(wide)
-}
-
-#[cfg(target_os = "windows")]
-fn to_wide_str(value: &str) -> Result<Vec<u16>, AdapterError> {
-    if value.contains('\0') {
-        return Err(AdapterError::new(
-            ErrorCode::InvalidArgs,
-            "Launch command line contains an interior NUL",
-        ));
-    }
-    let mut wide: Vec<u16> = value.encode_utf16().collect();
-    wide.push(0);
-    Ok(wide)
 }
 
 fn ambiguous_apps(matches: &[ProcessRow]) -> AdapterError {

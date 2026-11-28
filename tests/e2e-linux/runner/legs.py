@@ -45,8 +45,8 @@ class Leg:
 
 
 REGISTRY: tuple[Leg, ...] = (
-    Leg('ref_actions.expand', 'A ref expands the Calculator menu and reveals its children, then restores', 'Calculator', ('x11-openbox',), ('headless', 'headed'), ('atspi', 'x11'), 'pass', ''),
-    Leg('ref_actions.collapse', 'A ref collapses the Calculator menu and hides its children, then restores', 'Calculator', ('x11-openbox',), ('headless', 'headed'), ('atspi', 'x11'), 'pass', ''),
+    Leg('ref_actions.expand', 'A ref expands the Calculator menu and reveals its children, then restores', 'Calculator', ('x11-openbox',), ('headed',), ('atspi', 'x11'), 'pass', ''),
+    Leg('ref_actions.collapse', 'A ref collapses the Calculator menu and hides its children, then restores', 'Calculator', ('x11-openbox',), ('headed',), ('atspi', 'x11'), 'pass', ''),
     Leg('ref_actions.scroll', 'Ref scroll changes visible Settings rows, then restores', 'Settings', ('x11-openbox', 'x11-mutter'), ('headed',), ('atspi', 'x11'), 'pass', ''),
     Leg('ref_actions.scroll_headless_refusal', 'Headless ref scroll is refused without changing visible rows', 'Settings', ('x11-openbox',), ('headless',), ('atspi', 'x11'), 'asserted-refusal', "the leg asserts the product's refusal as its expected outcome"),
     Leg('ref_actions.scroll_to', 'Ref scroll-to reveals an offscreen control and restores the viewport', 'Settings', ('x11-openbox',), ('headless', 'headed'), ('atspi', 'x11'), 'pass', ''),
@@ -56,7 +56,7 @@ REGISTRY: tuple[Leg, ...] = (
     Leg('ref_actions.double_click_headless_refusal', 'Headless double-click is refused without selecting text', 'Text Editor', ('x11-openbox',), ('headless',), ('atspi', 'x11'), 'asserted-refusal', "the leg asserts the product's refusal as its expected outcome"),
     Leg('ref_actions.triple_click', 'Ref triple-click selects a document line and restores selection', 'Text Editor', ('x11-openbox', 'x11-mutter'), ('headed',), ('atspi', 'x11'), 'pass', ''),
     Leg('ref_actions.triple_click_headless_refusal', 'Headless triple-click is refused without selecting text', 'Text Editor', ('x11-openbox',), ('headless',), ('atspi', 'x11'), 'asserted-refusal', "the leg asserts the product's refusal as its expected outcome"),
-    Leg('ref_actions.right_click', 'Ref right-click opens the raw context menu and restores it', 'Text Editor', ('x11-openbox', 'x11-mutter'), ('headless', 'headed'), ('atspi', 'x11'), 'pass', ''),
+    Leg('ref_actions.right_click', 'Ref right-click opens the raw context menu and restores it', 'Text Editor', ('x11-openbox', 'x11-mutter'), ('headed',), ('atspi', 'x11'), 'pass', ''),
     Leg('ref_actions.hover', 'Ref hover exposes native status text and restores it', 'Qt window', ('x11-openbox', 'x11-mutter'), ('headed',), ('atspi', 'x11'), 'pass', ''),
     Leg('ref_actions.hover_headless_refusal', 'Headless ref hover is refused without exposing status text', 'Qt window', ('x11-openbox',), ('headless',), ('atspi', 'x11'), 'asserted-refusal', "the leg asserts the product's refusal as its expected outcome"),
     Leg('ref_actions.drag', 'Ref drag selects document text and restores selection', 'Text Editor', ('x11-openbox',), ('headed',), ('atspi', 'x11'), 'pass', ''),

@@ -37,19 +37,23 @@ use a private session and runtime directory for isolated work.
   accessibility bus does not establish pointer, window-control, capture, shell,
   notification, or tray capability.
 - GTK refs can retain native element addresses and ancestry.
-  Chromium, Qt, and unknown-toolkit refs need whole-window uniqueness. Take fresh refs
-  after list changes; a narrower drill does not disambiguate identical twins.
+  Chromium, Qt, and unknown-toolkit refs must be unique in the window or inside
+  their nearest unique ancestor. Take fresh refs after list changes; a narrower
+  drill does not disambiguate identical twins.
 - GTK4 list-backed dropdowns stay in the window tree. Use `wait --text` and
   `snapshot --root` to read their contents, not a menu-surface wait.
   Menu-role popups use the menu surface instead.
 - Popup and dialog openers can take the foreground and refuse headless.
   Qt combo selection may need pointer input to commit rather than highlight a row.
   Stop on a headed-only refusal instead of changing mode.
+- Headless `restore` of a minimized window and headless `minimize` of the focused window refuse with `POLICY_DENIED`; the system raises or moves focus. Stop on that refusal.
+- A headless graceful `close-app` reads which window has the focus first. When it cannot (a Wayland session, or an owner it cannot identify), it fails with `POLICY_DENIED` (`details.kind: focus_unreadable`) before any close request is sent. Report it to the user, or use `--force`, which discards unsaved work.
 - A window can precede its content. Wait for the application's observable
   result; an accepted AT-SPI call or a changed selected value is not proof that
   dependent handlers ran. Wait for each effect before another click.
 - Wayland refuses headed pointer input; window operations can use a mapped
   Xwayland client, but native Wayland windows lack that route.
+- Authorized physical `type` sends a newline as `Return` on X11 too. It refuses a tab and other control characters.
 - Authorized physical `type` on Wayland sends a newline as `Return` and a tab as
   `Tab`, which can submit a form or move focus instead of inserting literal text.
 - Wayland per-window screenshots are unsupported; display capture uses a portal
@@ -67,7 +71,11 @@ use a private session and runtime directory for isolated work.
   process that runs that script, never to another script of the same interpreter. `--no-attach` refuses any running
   process of the same program (the same executable, or the interpreter running the same script) whatever its
   arguments. Use process and window identity from
-  observations rather than guessing from a window title.
+  observations rather than guessing from a window title. Without `--activate`,
+  a launch on X11 gives the focus and the window order back to the window that
+  had them when a new window took them, and reports `focus_returned: true`, or
+  `false` with a suggestion when it could not. A headless click that opens a
+  dialog is guarded the same way (`details.focus_returned`).
 - Sandboxes are not available on Linux yet. To run agent-desktop in a container you manage yourself, see `agent-browser.dev/desktop/guides/docker-container`.
 
 ## Troubleshooting

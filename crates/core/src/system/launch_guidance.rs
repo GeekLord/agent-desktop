@@ -21,4 +21,14 @@ pub struct LaunchGuidance {
     /// when there is nothing more useful to say than the fields already do.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+    /// Whether the launch gave focus back when the launched application took
+    /// it: `Some(true)` when restored, `Some(false)` when restoration failed,
+    /// and `None` when nothing intruded or the launch did not monitor focus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus_returned: Option<bool>,
+    /// Present when the post-launch focus watch ended before a spawned helper's
+    /// window appeared (`"child_window_pending"`). Absent when the watch
+    /// finished cleanly or did not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub front_watch: Option<String>,
 }

@@ -67,7 +67,7 @@ agent-desktop click '@s8f3k2p9:e12' --wait-for "<role>:<text>"   # act, then ret
 agent-desktop set-value '@s8f3k2p9:e4' "<text>"  # replaces the whole value; the headless route
 agent-desktop type '@s8f3k2p9:e4' "<text>"       # inserts text at the caret and keeps the rest
 agent-desktop get '@s8f3k2p9:e4' --property value
-agent-desktop close-app "<app>"                # headless graceful close can be refused; see --force below
+agent-desktop close-app "<app>"                # a save prompt keeps the app open; see --force below
 ```
 
 If an action reports `data.surfaces`, inspect the overlay before acting on the
@@ -78,11 +78,7 @@ Use `launch` with a program name or path accepted by the platform. A running
 process or a launch result without `window` does not prove a window is ready.
 `launch --cdp [<port>]` opens a loopback DevTools port on a fresh Chromium-based process and returns `data.cdp`; a running app returns `ACTION_FAILED`, so `close-app` first.
 agent-desktop never talks to the port: hand it to a CDP client. While the port is open, any local process can control the app's web contents, including processes of other accounts on the same machine, because the DevTools port has no authentication.
-Request `--cdp` only for the step that needs it. `close-app` ends the exposure.
-`launch` returns when a window is seen, when the launched process and everything it started have exited without one, or at the timeout. A launcher that hands its work to another process ends the wait with `delivered_unverified`, no `window` and a `suggestion` that points at `list-windows`.
-By default `launch` attaches to a running instance and sends nothing. An attached result carries the pid of an instance this call did not start; never close it as your own. `--no-attach` returns `ACTION_FAILED`, `not_delivered`, with the running pids when an instance already runs, on every platform. `--arg` values that start with `-` need `--arg=<value>`. A launch with arguments never attaches silently: Windows and Linux start the program so it forwards them, and macOS opens an explicit file path (absolute, `./`, `~/` or `file://`) as a document.
-A graceful `close-app` on macOS stops on an open alert or sheet with `ACTION_FAILED`, `details.cause: modal_pending`. Answer the prompt or use `--force`.
-`press` with `cmd`, `ctrl` or `alt` and `--app` reaches only a frontmost app; for a background app it returns `ACTION_FAILED` with `check: process_focus` and sends nothing. An unconfirmed window focus is `ACTION_FAILED` with `check: window_active`, `not_delivered`; nothing is stale, so bring the window forward and retry.
+Request `--cdp` only for the step that needs it. `close-app` ends the exposure. `launch` returns when a window is seen, when the launched process and everything it started have exited without one, or at the timeout. A launcher that hands its work to another process ends the wait with `delivered_unverified`, no `window` and a `suggestion` that points at `list-windows`. By default `launch` attaches to a running instance and sends nothing. An attached result carries the pid of an instance this call did not start; never close it as your own. `--no-attach` returns `ACTION_FAILED`, `not_delivered`, with the running pids when an instance already runs, on every platform. `--arg` values that start with `-` need `--arg=<value>`. A launch with arguments never attaches silently: Windows and Linux start the program so it forwards them, and macOS opens an explicit file path (absolute, `./`, `~/` or `file://`) as a document. A graceful `close-app` on macOS stops on an open alert or sheet with `ACTION_FAILED`, `details.cause: modal_pending`. Answer the prompt or use `--force`. `press` with `cmd`, `ctrl` or `alt` and `--app` reaches only a frontmost app; for a background app it returns `ACTION_FAILED` with `check: process_focus` and sends nothing. An unconfirmed window focus is `ACTION_FAILED` with `check: window_active`, `not_delivered`; nothing is stale, so bring the window forward and retry.
 
 ## Workflows
 
@@ -122,13 +118,14 @@ Keep that scope from observation through verification.
 After a UI change, re-observe the affected region. A root drill keeps its snapshot
 id and refs outside that subtree, including the root, but replaces descendant refs.
 Refs re-identify live elements; they are not coordinates or a promise that a widget
-instance survives. Without a native element token, identity must be unique across
-the whole window at capture and resolution. Values and bounds are not identity.
+instance survives. Without a native element token, identity must be unique in the
+whole window, or inside the nearest ancestor that is unique (a cell inside its
+row), at capture and resolution. Values and bounds are not identity.
 
 - `STALE_REF` means no matching live element or a stale native token. Observe again.
 - `AMBIGUOUS_TARGET` means multiple matches or unproven capture identity. Identical
-  twins stay ambiguous after another snapshot or a narrower drill; choose a unique
-  control. If capture identity was unproven because the read was incomplete, finish
+  twins that no unique ancestor separates stay ambiguous after another snapshot or
+  a narrower drill; choose a unique control. If capture identity was unproven because the read was incomplete, finish
   the observation before acting.
 - `SNAPSHOT_NOT_FOUND` means the snapshot is absent in the current scope. Check the
   session before taking a replacement snapshot.

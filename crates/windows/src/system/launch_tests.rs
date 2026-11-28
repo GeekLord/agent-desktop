@@ -185,9 +185,6 @@ fn absolute_cwd_returns_an_absolute_path_unchanged() {
 }
 
 #[cfg(target_os = "windows")]
-use crate::system::test_support::test_time::deadline;
-
-#[cfg(target_os = "windows")]
 fn matching_pids(image: &str) -> Vec<ProcessId> {
     matching_processes(image)
         .expect("snapshot")
@@ -288,3 +285,11 @@ fn a_trailing_backslash_cannot_escape_the_closing_quote() {
 
 #[path = "launch_renderer_tests.rs"]
 mod renderer_tests;
+
+#[test]
+fn a_launch_without_activate_asks_for_no_activation_and_an_activating_one_does_not() {
+    let quiet = startup_show(false);
+    assert_eq!((quiet.flags, quiet.show), (0x1, 4));
+    let loud = startup_show(true);
+    assert_eq!((loud.flags, loud.show), (0, 0));
+}

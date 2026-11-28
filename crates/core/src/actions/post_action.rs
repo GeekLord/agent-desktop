@@ -1,7 +1,14 @@
+use crate::system::front_guard::DispatchMark;
+use crate::system::front_pending::FrontPending;
 use crate::{
     Action, ActionRequest, ActionResult, AdapterError, DeliverySemantics, ErrorCode,
     InteractionLease, LiveElement, NativeHandle, PlatformAdapter,
 };
+
+/// How long the front guard keeps watching after a headless action that can
+/// open a window returns: a dialog can take the focus a moment after the
+/// application acknowledges the action.
+const ACTION_SETTLE: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Settles the disposition of an error from `execute_action` that carries
 /// none. An adapter that refuses an action as unsupported or invalid decides
@@ -22,18 +29,78 @@ fn settle_disposition(error: AdapterError) -> AdapterError {
     }
 }
 
-/// Executes once, then verifies stateful actions from fresh platform observations.
+/// Executes once, then verifies stateful actions from fresh platform
+/// observations. A headless action that can open a window runs under the front
+/// guard, which gives the user's focus and window order back if the window
+/// takes them.
 pub fn execute_verified_action(
+    adapter: &dyn PlatformAdapter,
+    handle: &NativeHandle,
+    request: ActionRequest,
+    lease: &InteractionLease,
+) -> Result<ActionResult, AdapterError> {
+    execute_verified_deferred(adapter, handle, request, lease).0
+}
+
+/// As [`execute_verified_action`], with the rest of the front watch a spawned
+/// helper can owe: the caller runs it once it has released the lease.
+pub(crate) fn execute_verified_deferred(
+    adapter: &dyn PlatformAdapter,
+    handle: &NativeHandle,
+    request: ActionRequest,
+    lease: &InteractionLease,
+) -> (Result<ActionResult, AdapterError>, Option<FrontPending>) {
+    if !request.action.can_open_window() {
+        return (
+            run_verified_action(adapter, handle, request, lease, &DispatchMark::default()),
+            None,
+        );
+    }
+    let policy = request.policy;
+    let target = request.expected_process.as_ref().map_or_else(
+        crate::system::front_target::FrontTarget::default,
+        |process| crate::system::front_target::FrontTarget::of_process(adapter, process.pid.get()),
+    );
+    let guarded = crate::system::front_guard::guarded_deferred(
+        adapter,
+        policy,
+        lease,
+        crate::system::front_guard::FrontWatch {
+            target,
+            settle: ACTION_SETTLE,
+            after_release: true,
+        },
+        |mark| run_verified_action(adapter, handle, request, lease, mark),
+    );
+    let (result, front, pending) = match guarded {
+        Ok(guarded) => guarded,
+        Err(error) => return (Err(error), None),
+    };
+    let result = result.map_err(|mut error| {
+        front.note_in_error(&mut error);
+        error
+    });
+    let result = result.map(|mut result| {
+        front.note_in(&mut result.details);
+        result
+    });
+    (result, pending)
+}
+
+fn run_verified_action(
     adapter: &dyn PlatformAdapter,
     handle: &NativeHandle,
     mut request: ActionRequest,
     lease: &InteractionLease,
+    mark: &DispatchMark,
 ) -> Result<ActionResult, AdapterError> {
     let action = request.action.clone();
     if !action.requires_state_readback() {
-        return adapter
+        let result = adapter
             .execute_action(handle, request, lease)
             .map_err(settle_disposition);
+        mark.dispatched();
+        return result;
     }
     let deadline = lease.deadline();
     let before = matches!(action, Action::TypeText(_) | Action::Toggle)
@@ -59,15 +126,14 @@ pub fn execute_verified_action(
         }),
         _ => None,
     };
-    let execution = adapter
-        .execute_action(handle, request, lease)
-        .map_err(settle_disposition)
-        .map(|mut result| {
-            if matches!(action, Action::Toggle) {
-                result.action = action.name().into();
-            }
-            result
-        });
+    let acknowledged = adapter.execute_action(handle, request, lease);
+    mark.dispatched();
+    let execution = acknowledged.map_err(settle_disposition).map(|mut result| {
+        if matches!(action, Action::Toggle) {
+            result.action = action.name().into();
+        }
+        result
+    });
     if execution
         .as_ref()
         .is_err_and(|error| error.disposition == DeliverySemantics::not_delivered())

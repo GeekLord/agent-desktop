@@ -97,7 +97,7 @@ pub trait SystemOps: Send + Sync {
         &self,
         _id: &str,
         _options: &crate::system::launch_options::LaunchOptions,
-        _lease: &InteractionLease,
+        _lease: InteractionLease,
     ) -> Result<crate::system::launch_result::LaunchResult, AdapterError> {
         Err(AdapterError::not_supported("launch_app"))
     }
@@ -206,19 +206,12 @@ pub trait SystemOps: Send + Sync {
         Err(AdapterError::not_supported("capture_signal_baseline"))
     }
 
-    /// Whether a graceful close request can make the application open a prompt
-    /// (a save dialog) that takes the foreground. Core refuses a graceful
-    /// `close-app` whose policy forbids focus when it can. The default is
-    /// `false`: no prompt was measured.
-    fn graceful_close_may_prompt(&self) -> bool {
-        false
-    }
-
     fn close_app(
         &self,
         _app: &AppInfo,
         _force: bool,
         _lease: &InteractionLease,
+        _policy: crate::InteractionPolicy,
     ) -> Result<OperationReport, AdapterError> {
         Err(AdapterError::not_supported("close_app"))
     }
@@ -285,7 +278,7 @@ pub trait SystemOps: Send + Sync {
         policy: InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<ActionResult, AdapterError> {
-        super::window_key_gate::press_in_exact_window(self, window, combo, policy, lease)
+        super::window_key_refusal::press_in_exact_window(self, window, combo, policy, lease)
     }
 
     fn wait_for_menu(
@@ -297,10 +290,47 @@ pub trait SystemOps: Send + Sync {
         Err(AdapterError::not_supported("wait_for_menu"))
     }
 
+    /// What the user sees in front. Cheap: the front guard polls it.
+    fn read_front(&self, _deadline: Deadline) -> Result<crate::FrontView, AdapterError> {
+        Err(AdapterError::not_supported("read_front"))
+    }
+
+    /// The executable name and start time of `pid`, which the front guard
+    /// reads to tell the command target's new windows from the user's.
+    fn front_process(&self, _pid: u32) -> Option<crate::FrontProcess> {
+        None
+    }
+
+    /// The processes that descend from `root` and started at or after
+    /// `since_ms` (milliseconds since the Unix epoch) and are still running,
+    /// or `None` where the adapter cannot list them. The front guard uses it
+    /// to keep watching for a window a spawned helper has not yet shown.
+    fn spawned_descendants(&self, _root: u32, _since_ms: u64) -> Option<Vec<u32>> {
+        None
+    }
+
+    fn keep_below(
+        &self,
+        _window: &crate::FrontWindow,
+        _above: &crate::FrontWindow,
+        _lease: &InteractionLease,
+    ) -> Result<(), AdapterError> {
+        Err(AdapterError::not_supported("keep_below"))
+    }
+
+    fn give_back(
+        &self,
+        _window: &crate::FrontWindow,
+        _lease: &InteractionLease,
+    ) -> Result<(), AdapterError> {
+        Err(AdapterError::not_supported("give_back"))
+    }
+
     fn window_op(
         &self,
         _win: &WindowInfo,
         _op: WindowOp,
+        _policy: InteractionPolicy,
         _lease: &InteractionLease,
     ) -> Result<OperationReport, AdapterError> {
         Err(AdapterError::not_supported("window_op"))

@@ -39,6 +39,8 @@ fn present_guidance_sits_flat_beside_the_launch_keys() {
         }),
         renderer: Some(RendererKind::Chromium),
         suggestion: Some("guidance".into()),
+        focus_returned: None,
+        front_watch: None,
     };
     launched.disposition = DeliverySemantics::delivered_verified();
 
@@ -80,4 +82,17 @@ fn a_payload_written_before_disposition_existed_deserializes_as_unknown() {
 
     assert_eq!(back.disposition, DeliverySemantics::unknown());
     assert_eq!(back.disposition.retry(), crate::RetryDisposition::Unknown);
+}
+
+#[test]
+fn a_returned_focus_is_reported_only_when_present() {
+    let mut launched = bare();
+    let quiet = serde_json::to_value(&launched).unwrap();
+    assert!(quiet.get("focus_returned").is_none());
+    launched.guidance.focus_returned = Some(true);
+    let restored = serde_json::to_value(&launched).unwrap();
+    assert_eq!(restored["focus_returned"], true);
+    launched.guidance.focus_returned = Some(false);
+    let failed = serde_json::to_value(&launched).unwrap();
+    assert_eq!(failed["focus_returned"], false);
 }

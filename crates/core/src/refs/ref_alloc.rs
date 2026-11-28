@@ -62,6 +62,7 @@ pub(crate) fn ref_entry_from_node(
             root_ref,
             path_is_absolute: false,
             path: smallvec::SmallVec::from_slice(path),
+            chain: Default::default(),
         },
     }
 }
@@ -263,11 +264,12 @@ impl<'a> AllocationPlan<'a> {
         }
     }
 
-    fn proof(&self, entry: &RefEntry, path: &[usize]) -> crate::IdentityProof {
-        self.capture
-            .map_or(crate::IdentityProof::Unproven, |capture| {
-                capture.proof_at(entry, path)
-            })
+    /// Builds `entry` under the capture rule: proven when it is unique in the
+    /// window or inside the chain of ancestors recorded on it.
+    fn prove(&self, entry: &mut RefEntry, path: &[usize]) {
+        if let Some(capture) = self.capture {
+            capture.prove_at(entry, path);
+        }
     }
 }
 
@@ -316,7 +318,7 @@ fn allocate_refs_at_path(
         );
         entry.scope.path_is_absolute = config.scope.root_ref_id.is_some();
         forget_name_of_unread_value(&mut entry, plan, path);
-        entry.identity.proof = plan.proof(&entry, path);
+        plan.prove(&mut entry, path);
         entry.source.renderer_accessibility_forced = config.options.force_renderer_accessibility;
         if !config.options.include_bounds && has_meaningful_identity(&entry) {
             entry.geometry.bounds = None;
@@ -330,7 +332,7 @@ fn allocate_refs_at_path(
 
     if is_skeleton_anchor {
         let mut entry = skeleton_anchor_entry(&node, &config.source, path);
-        entry.identity.proof = plan.proof(&entry, path);
+        plan.prove(&mut entry, path);
         entry.source.renderer_accessibility_forced = config.options.force_renderer_accessibility;
         if !config.options.include_bounds && has_meaningful_identity(&entry) {
             entry.geometry.bounds = None;

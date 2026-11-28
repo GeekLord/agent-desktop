@@ -1,15 +1,15 @@
 use agent_desktop_core::{
     ActionResult, AdapterError, AdapterSession, AppInfo, Deadline, DeliverySemantics,
-    DismissAllNotificationsRequest, DismissNotificationRequest, DisplayInfo, ImageBuffer,
-    InteractionLease, InteractionPolicy, KeyCombo, NotificationActionRequest, NotificationFilter,
-    NotificationInfo, ObservationOps, OperationReport, PermissionReport, ProcessIdentity,
-    ScreenshotTarget, SessionAffinity, SignalBaseline, SignalFilter, SnapshotSurface,
-    SurfaceOpening, SystemOps, WindowFilter, WindowInfo, WindowOp,
-    system::launch_options::LaunchOptions, system::process_state::ProcessState,
+    DismissAllNotificationsRequest, DismissNotificationRequest, DisplayInfo, FrontView,
+    FrontWindow, ImageBuffer, InteractionLease, InteractionPolicy, KeyCombo,
+    NotificationActionRequest, NotificationFilter, NotificationInfo, ObservationOps,
+    OperationReport, PermissionReport, ProcessIdentity, ScreenshotTarget, SessionAffinity,
+    SignalBaseline, SignalFilter, SnapshotSurface, SurfaceOpening, SystemOps, WindowFilter,
+    WindowInfo, WindowOp, system::launch_options::LaunchOptions,
+    system::process_state::ProcessState,
 };
 
 use crate::adapter::WindowsAdapter;
-use crate::system::close_outcome::CloseOutcome;
 
 #[cfg(target_os = "windows")]
 #[path = "tcp_listener.rs"]
@@ -180,9 +180,9 @@ impl SystemOps for WindowsAdapter {
         &self,
         id: &str,
         options: &LaunchOptions,
-        lease: &InteractionLease,
+        lease: InteractionLease,
     ) -> Result<agent_desktop_core::system::launch_result::LaunchResult, AdapterError> {
-        crate::system::launch::launch_app_impl(id, options, lease.deadline())
+        crate::system::launch::launch_app_impl(id, options, lease)
     }
 
     fn process_owns_tcp_listener(
@@ -194,31 +194,49 @@ impl SystemOps for WindowsAdapter {
         tcp_listener::owns_listener(&process, port, deadline)
     }
 
-    /// Verified termination: `Ok(())` only after the process is observed gone
-    /// (A21-3). Graceful posts `WM_CLOSE`; force calls `TerminateProcess`.
     fn close_app(
         &self,
         app: &AppInfo,
         force: bool,
         lease: &InteractionLease,
+        _policy: agent_desktop_core::InteractionPolicy,
     ) -> Result<OperationReport, AdapterError> {
-        let dispatched = crate::system::close::close_app_impl(app, force, lease.deadline())
-            .map(|outcome| outcome == CloseOutcome::Exited);
-        OperationReport::from_close_dispatch(app, dispatched)
+        crate::system::close::close_app_report(app, force, lease.deadline())
     }
 
-    /// `SetWindowPos`/`ShowWindow` with Win32 placement re-read verification
-    /// (A21-5); never UIA `IsOffscreen`/`-32000`.
+    fn read_front(&self, deadline: Deadline) -> Result<FrontView, AdapterError> {
+        crate::system::window::window_front::read_front(deadline)
+    }
+
+    fn front_process(&self, pid: u32) -> Option<agent_desktop_core::FrontProcess> {
+        crate::system::window::window_front::front_process(pid)
+    }
+
+    fn spawned_descendants(&self, root: u32, since_ms: u64) -> Option<Vec<u32>> {
+        crate::system::window::window_front::spawned_descendants(root, since_ms)
+    }
+
+    fn keep_below(
+        &self,
+        window: &FrontWindow,
+        above: &FrontWindow,
+        _lease: &InteractionLease,
+    ) -> Result<(), AdapterError> {
+        crate::system::window::window_front::keep_below(window, above)
+    }
+
+    fn give_back(&self, win: &FrontWindow, lease: &InteractionLease) -> Result<(), AdapterError> {
+        crate::system::window::window_front::give_back(win, lease)
+    }
+
     fn window_op(
         &self,
         win: &WindowInfo,
         op: WindowOp,
+        policy: agent_desktop_core::InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<OperationReport, AdapterError> {
-        let readback = crate::system::window::window_op_readback::window_readback(&op);
-        let dispatched =
-            crate::system::window::window_op::window_op_impl(win, op.clone(), lease.deadline());
-        OperationReport::from_window_dispatch(win, &op, readback, dispatched)
+        crate::system::window::window_op::window_op_report(win, op, policy, lease.deadline())
     }
 
     fn resolve_window_strict(

@@ -68,6 +68,19 @@ pub(super) fn wayland_session(request: &Request<'_>) -> AdapterError {
     }))
 }
 
+pub(super) fn wayland_headless_graceful(request: &Request<'_>) -> AdapterError {
+    agent_desktop_core::foreground_denied(
+        "Closing an application gracefully on Wayland cannot monitor or return focus if a save prompt opens, which the interaction policy does not allow",
+        "wayland_focus_unmonitored",
+        "close-app",
+        request.policy,
+    )
+    .with_suggestion(format!(
+        "{} Or use --force to end the process without a close request.",
+        agent_desktop_core::headed_mode_suggestion("may raise a save prompt that takes focus")
+    ))
+}
+
 pub(super) fn windowless(request: &Request<'_>) -> AdapterError {
     refused(
         ErrorCode::ActionFailed,
@@ -150,15 +163,7 @@ pub(super) fn dialog_pending(
     } else {
         DeliverySemantics::not_delivered()
     };
-    AdapterError::new(
-        ErrorCode::ActionFailed,
-        format!(
-            "Process {} has {dialogs} open dialog(s), so no close request was sent to them",
-            request.pid
-        ),
-    )
-    .with_suggestion(PROMPT)
-    .with_details(json!({
+    let details = json!({
         "cause": "dialog_pending",
         "app": request.name,
         "pid": request.pid,
@@ -166,8 +171,22 @@ pub(super) fn dialog_pending(
         "dialogs": dialogs,
         "dialog_titles": titles,
         "dialog": titles.first(),
-    }))
-    .with_disposition(delivery)
+    });
+    let message = if sent {
+        format!(
+            "Process {} answered the close request with {dialogs} open dialog(s), which were left open",
+            request.pid
+        )
+    } else {
+        format!(
+            "Process {} has {dialogs} open dialog(s), so no close request was sent to them",
+            request.pid
+        )
+    };
+    AdapterError::new(ErrorCode::ActionFailed, message)
+        .with_suggestion(PROMPT)
+        .with_details(details)
+        .with_disposition(delivery)
 }
 
 pub(super) fn waited_out(

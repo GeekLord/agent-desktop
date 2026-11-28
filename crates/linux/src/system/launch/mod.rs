@@ -14,6 +14,7 @@ use self::launch_observe::{POLL_INTERVAL, Spawned, find_owner, pids_of, running_
 use self::launch_search::Search;
 use self::launch_spawn::{before_spawn, spawn, validate};
 use self::launch_target::{Plan, resolve};
+use self::launch_unreadable::{ATTACH_READ_GRACE, is_window_unreadable};
 use super::SharedBus;
 use crate::system::app::app_alias::current_index;
 use crate::system::focus::focus_window::focus_window;
@@ -22,7 +23,6 @@ use crate::system::process::process_facts;
 use crate::system::process::running_app::Running;
 use crate::system::process::web_family::WebFamily;
 use crate::system::registry::registry_frames::RootRead;
-use crate::system::window::native_group::is_unproven;
 use crate::system::window::window_ops::{require_complete_frames, windows_of_process};
 
 #[path = "launch_baseline.rs"]
@@ -111,25 +111,6 @@ const WINDOW_GRACE: Duration = Duration::from_millis(2_000);
 /// was already running and forwarded the request.
 const NEW_WINDOW_WAIT: Duration = Duration::from_millis(5_000);
 
-/// How long an attach keeps asking an application that does not answer for
-/// its windows. An attach sends nothing, so waiting longer cannot change what
-/// the application will say; a spawned application is different, because its
-/// windows are still being created.
-const ATTACH_READ_GRACE: Duration = Duration::from_millis(2_000);
-
-/// A window read that says nothing about the windows: the application did
-/// not answer, or the display could not prove them.
-fn is_window_unreadable(error: &AdapterError) -> bool {
-    is_unproven(error)
-        || matches!(
-            error.code,
-            ErrorCode::Timeout
-                | ErrorCode::AppUnresponsive
-                | ErrorCode::AppNotFound
-                | ErrorCode::WindowNotFound
-        )
-}
-
 const UNLISTED_RUNNING: &str = "The process started but is not on the accessibility bus yet. Its pid is the spawned process's and may be a wrapper of the application. Run 'list-apps' to see whether it appears.";
 
 const UNLISTED_EXITED: &str = "The launcher exited cleanly and no owner of the launch was proven: it handed its work to another process, for example a running instance it forwarded the arguments to. Its pid is the launcher's. Run 'list-windows' to see where the work arrived.";
@@ -138,7 +119,7 @@ struct Launch<'a> {
     bus: &'a SharedBus,
     id: &'a str,
     options: &'a LaunchOptions,
-    lease: &'a InteractionLease,
+    lease: Option<InteractionLease>,
     deadline: Deadline,
 }
 
@@ -230,7 +211,10 @@ impl Launch<'_> {
     ) -> LaunchResult {
         let renderer = chromium_renderer(self.bus, owner.pid, self.deadline);
         let mut result = conclude(owner, window, self.options, arrival, |window| {
-            let activation = focus_window(self.bus, window, self.lease)?;
+            let lease = self.lease.as_ref().ok_or_else(|| {
+                AdapterError::new(ErrorCode::Internal, "The launch lease was released early")
+            })?;
+            let activation = focus_window(self.bus, window, lease)?;
             Ok(FocusAnswer {
                 window: same_window(
                     windows_of_process(self.bus, owner.pid, self.deadline),
@@ -248,7 +232,7 @@ impl Launch<'_> {
     /// window closed, is started again so that its launcher forwards to it
     /// and a window opens.
     fn attach(
-        &self,
+        &mut self,
         owner: &Running,
         plan: &Plan,
         running: &[Running],
@@ -308,29 +292,40 @@ impl Launch<'_> {
         }
     }
 
-    fn start(&self, plan: &Plan, running: &[Running]) -> Result<LaunchResult, AdapterError> {
+    fn start(&mut self, plan: &Plan, running: &[Running]) -> Result<LaunchResult, AdapterError> {
         let before = baseline::prepare(self.bus, &plan.identity, running, self.deadline);
         self.deadline.ensure_remaining().map_err(before_spawn)?;
         let mut spawned = spawn(self.id, plan, self.options)?;
-        match find_owner(self.bus, &mut spawned, plan, &before, self.deadline)? {
-            Some(owner) => {
-                let known = before
-                    .residents
-                    .iter()
-                    .find(|resident| resident.owner.identity() == owner.identity());
-                let window = match known {
-                    Some(resident) => self.window_of(&owner, true, &resident.windows)?,
-                    None if before.processes.contains(&owner.identity()) => None,
-                    None => self.window_of(&owner, true, &HashSet::new())?,
-                };
-                let arrival = LaunchArrival::started(
-                    owner.pid == spawned.pid,
-                    !before.processes.contains(&owner.identity()),
-                );
-                Ok(self.conclude_with(&owner, window, arrival))
-            }
-            None => Ok(self.report_unlisted(&spawned)),
-        }
+        self.ready(&mut spawned, plan, &before)
+    }
+
+    fn ready(
+        &self,
+        spawned: &mut Spawned,
+        plan: &Plan,
+        before: &baseline::Baseline,
+    ) -> Result<LaunchResult, AdapterError> {
+        Ok(
+            match find_owner(self.bus, spawned, plan, before, self.deadline)? {
+                Some(owner) => {
+                    let known = before
+                        .residents
+                        .iter()
+                        .find(|resident| resident.owner.identity() == owner.identity());
+                    let window = match known {
+                        Some(resident) => self.window_of(&owner, true, &resident.windows)?,
+                        None if before.processes.contains(&owner.identity()) => None,
+                        None => self.window_of(&owner, true, &HashSet::new())?,
+                    };
+                    let arrival = LaunchArrival::started(
+                        owner.pid == spawned.pid,
+                        !before.processes.contains(&owner.identity()),
+                    );
+                    self.conclude_with(&owner, window, arrival)
+                }
+                None => self.report_unlisted(spawned),
+            },
+        )
     }
 }
 
@@ -342,7 +337,7 @@ pub(crate) fn launch_app(
     bus: &SharedBus,
     id: &str,
     options: &LaunchOptions,
-    lease: &InteractionLease,
+    lease: InteractionLease,
 ) -> Result<LaunchResult, AdapterError> {
     validate(options)?;
     let deadline = bounded(lease.deadline(), options.timeout_ms);
@@ -350,11 +345,11 @@ pub(crate) fn launch_app(
     let plan = resolve(id, &options.args, &search, &current_index())?;
     let registry = crate::system::registry::read_processes(bus, deadline).map_err(before_spawn)?;
     let running = running_of(&registry).map_err(before_spawn)?;
-    let launch = Launch {
+    let mut launch = Launch {
         bus,
         id,
         options,
-        lease,
+        lease: Some(lease),
         deadline,
     };
     match decide_plan(
@@ -398,3 +393,4 @@ pub(crate) mod launch_search;
 mod launch_spawn;
 pub(crate) mod launch_step;
 pub(super) mod launch_target;
+mod launch_unreadable;

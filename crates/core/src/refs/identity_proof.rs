@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// later snapshot can separate them; `Unproven` means the capture did not read
 /// the whole window, or a node left a recorded field unread, so a snapshot with
 /// more budget can still prove the ref.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IdentityProof {
     #[default]

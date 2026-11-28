@@ -28,10 +28,6 @@ use crate::system::{
 const SURFACE_PROBE_MS: u64 = 3_000;
 
 impl SystemOps for LinuxAdapter {
-    fn graceful_close_may_prompt(&self) -> bool {
-        true
-    }
-
     fn subscribe_wait(
         &self,
         filter: &SignalFilter,
@@ -95,15 +91,16 @@ impl SystemOps for LinuxAdapter {
         app: &AppInfo,
         force: bool,
         lease: &InteractionLease,
+        policy: agent_desktop_core::InteractionPolicy,
     ) -> Result<OperationReport, AdapterError> {
-        close::close_app(self.bus(), app, force, lease)
+        close::close_app(self.bus(), app, force, lease, policy)
     }
 
     fn launch_app(
         &self,
         id: &str,
         options: &LaunchOptions,
-        lease: &InteractionLease,
+        lease: InteractionLease,
     ) -> Result<LaunchResult, AdapterError> {
         launch::launch_app(self.bus(), id, options, lease)
     }
@@ -125,13 +122,46 @@ impl SystemOps for LinuxAdapter {
         process_state::process_state(self.bus(), process, deadline)
     }
 
+    fn read_front(
+        &self,
+        deadline: Deadline,
+    ) -> Result<agent_desktop_core::FrontView, AdapterError> {
+        crate::system::focus::focus_front::read_front(deadline)
+    }
+
+    fn front_process(&self, pid: u32) -> Option<agent_desktop_core::FrontProcess> {
+        crate::system::focus::focus_front::front_process(pid)
+    }
+
+    fn spawned_descendants(&self, root: u32, since_ms: u64) -> Option<Vec<u32>> {
+        crate::system::focus::focus_front::spawned_descendants(root, since_ms)
+    }
+
+    fn keep_below(
+        &self,
+        window: &agent_desktop_core::FrontWindow,
+        above: &agent_desktop_core::FrontWindow,
+        _lease: &InteractionLease,
+    ) -> Result<(), AdapterError> {
+        crate::system::focus::focus_front::keep_below(window, above)
+    }
+
+    fn give_back(
+        &self,
+        window: &agent_desktop_core::FrontWindow,
+        _lease: &InteractionLease,
+    ) -> Result<(), AdapterError> {
+        crate::system::focus::focus_front::give_back(window)
+    }
+
     fn window_op(
         &self,
         win: &WindowInfo,
         op: WindowOp,
+        policy: agent_desktop_core::InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<OperationReport, AdapterError> {
-        window_op::window_op(self.bus(), win, op, lease)
+        window_op::window_op(self.bus(), win, op, policy, lease)
     }
 
     fn press_key_for_app(

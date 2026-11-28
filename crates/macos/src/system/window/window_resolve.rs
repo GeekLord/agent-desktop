@@ -49,9 +49,10 @@ pub(crate) fn resolve_window_strict(
     verify_window_record(win, &record)?;
     let mut resolved = window_info_from_record(win, &record)?;
     resolved.state.minimized = ax_state.minimized_by_id.get(&window_number).copied();
-    if let Some((_, Some(focused_number))) = ax_state.focused {
-        resolved.state.is_focused = focused_number == window_number;
-    }
+    resolved.state.is_focused = matches!(
+        ax_state.focused,
+        Some((_, Some(focused_number))) if focused_number == window_number
+    );
     Ok(resolved)
 }
 
@@ -188,7 +189,7 @@ fn window_info_from_record(
     })
 }
 
-fn ax_window_element_for_number(
+pub(crate) fn ax_window_element_for_number(
     pid: i32,
     window_number: i64,
     fallback_title: Option<&str>,

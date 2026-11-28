@@ -86,6 +86,7 @@ impl SystemOps for ReportingAdapter {
         _app: &AppInfo,
         _force: bool,
         _lease: &InteractionLease,
+        _policy: crate::InteractionPolicy,
     ) -> Result<OperationReport, AdapterError> {
         Ok(self.report.clone())
     }
@@ -94,6 +95,7 @@ impl SystemOps for ReportingAdapter {
         &self,
         _win: &WindowInfo,
         _op: WindowOp,
+        _policy: crate::InteractionPolicy,
         _lease: &InteractionLease,
     ) -> Result<OperationReport, AdapterError> {
         Ok(self.report.clone())
@@ -158,6 +160,7 @@ fn verified_window_move_reports_the_adapter_target_not_a_success_flag() {
             y: 20.0,
         },
         &adapter,
+        crate::InteractionPolicy::headless(),
     )
     .unwrap();
 

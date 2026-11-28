@@ -107,6 +107,7 @@ pub use refs::ref_process::RefProcess;
 pub use refs::ref_scope::RefScope;
 pub use refs::ref_source::RefSource;
 pub use refs::refs_store::RefStore;
+pub use refs::scope_chain::ScopeChain;
 pub use response::adapter_error::AdapterError;
 pub use response::app_error::AppError;
 pub use response::delivery_disposition::DeliveryDisposition;
@@ -118,11 +119,13 @@ pub use response::retry_disposition::RetryDisposition;
 pub use sandbox::exec_passthrough::ExecPassthrough;
 pub use sandbox::provider_script_output::ProviderScriptOutput;
 pub use sandbox::provider_script_request::ProviderScriptRequest;
-pub use session::interaction_lease::InteractionLease;
 #[cfg(unix)]
 pub use session::interaction_lease::{
     INTERACTION_LEASE_FD_ENV, acquire_unix_interaction_lease,
     adopt_inherited_unix_interaction_lease,
+};
+pub use session::interaction_lease::{
+    INTERACTION_LEASE_PURPOSE, InteractionLease, interaction_lease_timeout,
 };
 pub use session::process_lease_guard::ProcessLeaseGuard;
 pub use session::session_affinity::SessionAffinity;
@@ -137,6 +140,10 @@ pub use system::app_info::{AppInfo, AppPresentation, app_name_matches};
 pub use system::app_inventory::AppInventory;
 pub use system::app_inventory_query::AppInventoryQuery;
 pub use system::display_info::DisplayInfo;
+pub use system::front_outcome::FrontOutcome;
+pub use system::front_process::FrontProcess;
+pub use system::front_view::FrontView;
+pub use system::front_window::FrontWindow;
 pub use system::image_buffer::{ImageBuffer, MAX_PNG_INPUT_BYTES, parse_png_dimensions};
 pub use system::image_format::ImageFormat;
 pub use system::launch_arrival::LaunchArrival;
@@ -150,8 +157,11 @@ pub use system::permission_state::PermissionState;
 pub use system::process_id::ProcessId;
 pub use system::process_identity::ProcessIdentity;
 pub use system::screenshot_target::ScreenshotTarget;
+pub use system::spawned_tree::spawned_descendants_of;
 pub use system::surface_info::SurfaceInfo;
 pub use system::window_filter::WindowFilter;
+pub use system::window_frame_memory::WindowFrameMemory;
+pub use system::window_frame_record::WindowFrameRecord;
 pub use system::window_info::WindowInfo;
 pub use system::window_op::WindowOp;
 pub use system::window_readback::WindowReadback;

@@ -267,6 +267,61 @@ pub(crate) fn sleep(duration: Duration) {
     std::thread::sleep(duration)
 }
 
+/// Waits on `condvar` for at most `duration`, the blocking counterpart of
+/// [`sleep`]: under a frozen test clock it advances that clock and returns at
+/// once, so a wait against a virtual deadline expires the way a sleep does.
+#[cfg(not(test))]
+#[inline(always)]
+pub(crate) fn wait_on<'a, T>(
+    condvar: &std::sync::Condvar,
+    guard: std::sync::MutexGuard<'a, T>,
+    duration: Duration,
+) -> std::sync::MutexGuard<'a, T> {
+    condvar
+        .wait_timeout(guard, duration)
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .0
+}
+
+#[cfg(test)]
+pub(crate) fn wait_on<'a, T>(
+    condvar: &std::sync::Condvar,
+    guard: std::sync::MutexGuard<'a, T>,
+    duration: Duration,
+) -> std::sync::MutexGuard<'a, T> {
+    match VIRTUAL_NOW.get() {
+        Some(at) => {
+            let (guard, result) = condvar
+                .wait_timeout(guard, duration.min(Duration::from_millis(50)))
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if result.timed_out() {
+                VIRTUAL_NOW.set(Some(at.checked_add(duration).unwrap_or(at)));
+            }
+            guard
+        }
+        None => {
+            condvar
+                .wait_timeout(guard, duration)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0
+        }
+    }
+}
+
+/// Waits on `condvar` for an event, for at most `duration` of real time. Unlike
+/// [`wait_on`] it never advances a frozen test clock: the event it waits for is
+/// another thread finishing, which takes real time whatever the clock says.
+pub(crate) fn wait_for_event<'a, T>(
+    condvar: &std::sync::Condvar,
+    guard: std::sync::MutexGuard<'a, T>,
+    duration: Duration,
+) -> std::sync::MutexGuard<'a, T> {
+    condvar
+        .wait_timeout(guard, duration)
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .0
+}
+
 #[cfg(test)]
 thread_local! {
     static VIRTUAL_NOW: Cell<Option<Instant>> = const { Cell::new(None) };

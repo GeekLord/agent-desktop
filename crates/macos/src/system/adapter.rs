@@ -105,11 +105,34 @@ impl SystemOps for MacOSAdapter {
         crate::system::focus::focus_process(&process, lease.deadline())
     }
 
+    fn read_front(
+        &self,
+        deadline: Deadline,
+    ) -> Result<agent_desktop_core::FrontView, AdapterError> {
+        crate::system::window::window_front::read_front(deadline)
+    }
+
+    fn front_process(&self, pid: u32) -> Option<agent_desktop_core::FrontProcess> {
+        crate::system::window::window_front::front_process(pid)
+    }
+
+    fn spawned_descendants(&self, root: u32, since_ms: u64) -> Option<Vec<u32>> {
+        crate::system::window::window_front::spawned_descendants(root, since_ms)
+    }
+
+    fn give_back(
+        &self,
+        window: &agent_desktop_core::FrontWindow,
+        _lease: &InteractionLease,
+    ) -> Result<(), AdapterError> {
+        crate::system::window::window_front::give_back(window)
+    }
+
     fn launch_app(
         &self,
         id: &str,
         options: &agent_desktop_core::system::launch_options::LaunchOptions,
-        lease: &InteractionLease,
+        lease: InteractionLease,
     ) -> Result<agent_desktop_core::system::launch_result::LaunchResult, AdapterError> {
         crate::system::launch::launch_app_impl(id, options, lease.deadline())
     }
@@ -168,6 +191,7 @@ impl SystemOps for MacOSAdapter {
         app: &agent_desktop_core::AppInfo,
         force: bool,
         lease: &InteractionLease,
+        _policy: agent_desktop_core::InteractionPolicy,
     ) -> Result<OperationReport, AdapterError> {
         let dispatched = crate::system::app::app_ops::close_app_impl(app, force, lease.deadline())
             .map(|outcome| outcome == CloseOutcome::Exited);
@@ -251,12 +275,10 @@ impl SystemOps for MacOSAdapter {
         &self,
         win: &WindowInfo,
         op: WindowOp,
+        policy: agent_desktop_core::InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<OperationReport, AdapterError> {
-        let readback = crate::system::window::window_report::window_readback(&op);
-        let dispatched =
-            crate::system::window::window_ops::execute(win, op.clone(), lease.deadline());
-        OperationReport::from_window_dispatch(win, &op, readback, dispatched)
+        crate::system::window::window_frame::window_op(win, op, policy, lease.deadline())
     }
 
     fn list_notifications(
