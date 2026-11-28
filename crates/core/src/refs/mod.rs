@@ -357,6 +357,7 @@ pub(crate) fn home_override_active() -> bool {
     HOME_OVERRIDE.with(|cell| cell.borrow().is_some())
 }
 
+pub(crate) mod identity_proof;
 pub mod ref_alloc;
 pub(crate) mod ref_alloc_config;
 pub(crate) mod ref_alloc_options;
@@ -386,14 +387,14 @@ pub(crate) mod refs_test_support;
 pub(crate) mod refs_validate;
 pub(crate) mod resolve_attempt_outcome;
 pub mod resolve_errors;
+pub mod resolve_retry;
 pub mod resolve_saved_ref;
 #[cfg(test)]
 #[path = "refs_serde_tests.rs"]
 mod serde_tests;
 #[cfg(test)]
-#[path = "refs_tests.rs"]
-mod tests;
-
-#[cfg(test)]
 #[path = "refs_size_tests.rs"]
 mod size_tests;
+#[cfg(test)]
+#[path = "refs_tests.rs"]
+mod tests;

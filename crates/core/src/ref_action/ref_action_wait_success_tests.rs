@@ -27,7 +27,7 @@ fn entry() -> RefEntry {
             value: None,
             description: None,
             native_id: None,
-            unique_at_capture: true,
+            proof: crate::IdentityProof::Unique,
         },
         geometry: crate::RefGeometry {
             bounds_space: None,
@@ -111,7 +111,6 @@ fn enrichment_never_converts_a_successful_action_into_a_failure() {
             context: &CommandContext::default(),
         },
         ActionRequest::headless(Action::Click),
-        crate::ref_action::ref_action_single::dispatch_resolved,
     )
     .unwrap();
     assert_eq!(result.action, "click");

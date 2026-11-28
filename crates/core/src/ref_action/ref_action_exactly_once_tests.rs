@@ -207,7 +207,7 @@ fn entry() -> RefEntry {
             value: None,
             description: None,
             native_id: None,
-            unique_at_capture: true,
+            proof: crate::IdentityProof::Unique,
         },
         geometry: crate::RefGeometry {
             bounds_space: None,
@@ -243,7 +243,6 @@ fn execute(adapter: &DispatchGuardAdapter, timeout_ms: u64) -> Result<ActionResu
             context: &CommandContext::default(),
         },
         ActionRequest::headless(Action::Click).with_timeout_ms(Some(timeout_ms)),
-        crate::ref_action::ref_action_single::dispatch_resolved,
     )
 }
 
