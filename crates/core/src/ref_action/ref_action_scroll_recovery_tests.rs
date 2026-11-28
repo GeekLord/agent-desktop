@@ -13,6 +13,7 @@ struct ScrollRecoveryAdapter {
     dispatch_calls: AtomicU32,
     stays_offscreen: bool,
     scroll_should_fail: bool,
+    scroll_policy: std::sync::Mutex<Option<crate::InteractionPolicy>>,
 }
 
 impl ScrollRecoveryAdapter {
@@ -24,6 +25,7 @@ impl ScrollRecoveryAdapter {
             dispatch_calls: AtomicU32::new(0),
             stays_offscreen,
             scroll_should_fail,
+            scroll_policy: std::sync::Mutex::new(None),
         }
     }
 }
@@ -67,9 +69,11 @@ impl ActionOps for ScrollRecoveryAdapter {
     fn scroll_into_view(
         &self,
         _handle: &NativeHandle,
+        policy: crate::InteractionPolicy,
         _lease: &crate::InteractionLease,
     ) -> Result<(), AdapterError> {
         self.scroll_calls.fetch_add(1, Ordering::SeqCst);
+        *self.scroll_policy.lock().expect("the policy lock") = Some(policy);
         if self.scroll_should_fail {
             return Err(AdapterError::new(
                 ErrorCode::ActionFailed,
@@ -175,6 +179,30 @@ fn scroll_recovery_success_lets_the_action_proceed() {
     assert_eq!(adapter.scroll_calls.load(Ordering::SeqCst), 1);
     assert_eq!(adapter.dispatch_calls.load(Ordering::SeqCst), 1);
     assert_eq!(adapter.resolve_calls.load(Ordering::SeqCst), 2);
+}
+
+/// The recovery scroll runs under the policy the request carries, never a
+/// hardcoded one. A cursor-only policy exercises the forwarding without the
+/// window raise a headed preflight needs, which this stub cannot answer.
+#[test]
+fn scroll_recovery_runs_under_the_requests_interaction_policy() {
+    let adapter = ScrollRecoveryAdapter::new(true, false);
+    let policy = crate::InteractionPolicy {
+        allow_focus_steal: false,
+        allow_cursor_move: true,
+    };
+    let mut request = ActionRequest::headless(Action::Expand);
+    request.policy = policy;
+
+    execute_entry(&adapter, &entry(), request)
+        .expect_err("a target that stays offscreen stays unactionable");
+
+    let seen = adapter
+        .scroll_policy
+        .lock()
+        .expect("the policy lock")
+        .expect("the scroll ran");
+    assert_eq!(seen, policy);
 }
 
 #[test]

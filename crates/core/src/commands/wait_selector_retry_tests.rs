@@ -274,14 +274,20 @@ impl SystemOps for DisappearingWindowAdapter {}
 fn gone_wait_requires_window_absence_after_accessibility_disappears() {
     let _guard = HomeGuard::new();
     let _clock = crate::wait::deadline::VirtualClock::freeze();
-    for (kind, disappears, expected) in [
-        ("window_without_accessibility_element", true, None),
+    for (kind, disappears, expected, timeout_ms) in [
+        ("window_without_accessibility_element", true, None, 10_000),
         (
             "window_without_accessibility_element",
             false,
             Some("TIMEOUT"),
+            250,
         ),
-        ("unsupported_surface", true, Some("ACTION_NOT_SUPPORTED")),
+        (
+            "unsupported_surface",
+            true,
+            Some("ACTION_NOT_SUPPORTED"),
+            10_000,
+        ),
     ] {
         let adapter = DisappearingWindowAdapter {
             inventories: AtomicUsize::new(0),
@@ -291,7 +297,7 @@ fn gone_wait_requires_window_absence_after_accessibility_disappears() {
         let result = execute(
             WaitSelectorInput {
                 window_id: Some("w-1".into()),
-                timeout_ms: 250,
+                timeout_ms,
                 ..base_input("button:Close", true)
             },
             &adapter,

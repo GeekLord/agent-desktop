@@ -52,6 +52,7 @@ impl ActionOps for MinimizedWindowAdapter {
     fn scroll_into_view(
         &self,
         _handle: &NativeHandle,
+        _policy: crate::InteractionPolicy,
         _lease: &crate::InteractionLease,
     ) -> Result<(), AdapterError> {
         self.scrolls.fetch_add(1, Ordering::SeqCst);

@@ -43,7 +43,7 @@ best-effort and is judged by re-reading its effect.
 
 ## Window Activation Crosses the Boundary
 
-`focus-window` succeeds against a higher-integrity target.
+`--headed focus-window` succeeds against a higher-integrity target.
 `SetForegroundWindow` is gated by the Windows foreground-lock heuristic (recent
 input, `AllowSetForegroundWindow`), not by integrity. When foreground cannot be
 confirmed before the budget runs out, a strictly-higher target returns an

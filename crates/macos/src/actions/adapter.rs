@@ -14,7 +14,7 @@ impl ActionOps for MacOSAdapter {
     ) -> Result<agent_desktop_core::HeadedRequirement, AdapterError> {
         crate::actions::native_menu::headed_requirement(request, || {
             let handle = self.resolve_element_strict(entry, deadline)?;
-            crate::tree::native_menu::is_native_menu(ax_element(&handle)?, deadline)
+            crate::tree::native_menu::presses_like_a_menu(ax_element(&handle)?, deadline)
         })
     }
 
@@ -25,7 +25,7 @@ impl ActionOps for MacOSAdapter {
         deadline: Deadline,
     ) -> Result<agent_desktop_core::HeadedRequirement, AdapterError> {
         crate::actions::native_menu::headed_requirement(request, || {
-            crate::tree::native_menu::is_native_menu(ax_element(handle)?, deadline)
+            crate::tree::native_menu::presses_like_a_menu(ax_element(handle)?, deadline)
         })
     }
 
@@ -44,6 +44,7 @@ impl ActionOps for MacOSAdapter {
     fn scroll_into_view(
         &self,
         handle: &NativeHandle,
+        _policy: agent_desktop_core::InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<(), AdapterError> {
         crate::actions::scroll_into_view::scroll_into_view_impl(

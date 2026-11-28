@@ -84,13 +84,14 @@ agent-desktop screenshot /tmp/desktop.png
 ## Clipboard
 
 ```bash
-agent-desktop clipboard-set "hello from agent-desktop"
+agent-desktop clipboard-set "hello from agent-desktop" --headed
 agent-desktop clipboard-get
-agent-desktop clipboard-clear
+agent-desktop clipboard-clear --headed
 ```
 
 Formats and output follow the core `commands-system` reference. Text, images and
-file lists all work on Linux.
+file lists all work on Linux. `clipboard-set` and `clipboard-clear` write the
+user's clipboard and need `--headed`; `clipboard-get` stays headless.
 
 ### X11
 

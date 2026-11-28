@@ -56,6 +56,8 @@ pub struct ResolvedVocabulary {
     pub states: LocatorField<Vec<String>>,
     pub name: LocatorField<String>,
     pub description: LocatorField<String>,
+    /// The name is the element's `LabeledBy` target's text.
+    pub name_borrowed: bool,
 }
 
 impl ResolvedVocabulary {
@@ -68,6 +70,7 @@ impl ResolvedVocabulary {
             states: LocatorField::Unknown,
             name: LocatorField::Unknown,
             description: LocatorField::Unknown,
+            name_borrowed: false,
         }
     }
 }
@@ -230,7 +233,9 @@ impl ElementProperties {
             name: vocabulary.name,
             description: vocabulary.description,
             value,
-            identifiers: self.identifier_evidence(),
+            identifiers: self
+                .identifier_evidence()
+                .with_borrowed_name(vocabulary.name_borrowed),
             states: vocabulary.states,
             ref_evidence: LocatorRefEvidence {
                 window_bounds: LocatorField::Absent,
