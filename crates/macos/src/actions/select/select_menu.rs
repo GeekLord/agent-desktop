@@ -1,4 +1,6 @@
-use agent_desktop_core::{AdapterError, Deadline, DeliverySemantics, ErrorCode, InteractionPolicy};
+use agent_desktop_core::{
+    AdapterError, Deadline, DeliverySemantics, Effect, ErrorCode, InteractionPolicy,
+};
 
 use super::select_search::SelectSearch;
 use crate::tree::AXElement;
@@ -12,7 +14,7 @@ pub(crate) fn select_from_menu(
     policy: InteractionPolicy,
     deadline: Deadline,
 ) -> Result<bool, AdapterError> {
-    crate::actions::background_effect::Effect::ShowsMenu.refuse_unless_permitted(policy)?;
+    crate::actions::background_effect::require(policy, Effect::FocusSteal, "select", "shows_menu")?;
     let pid = require_pid(element, deadline)?;
     let identity = require_identity(pid)?;
     let needs_opening = needs_opening(
@@ -25,6 +27,7 @@ pub(crate) fn select_from_menu(
             ErrorCode::ActionNotSupported,
             "The target did not support AXShowMenu or AXPress",
         )
+        .with_disposition(DeliverySemantics::not_delivered())
         .with_suggestion("Use click to open the control, then snapshot the menu."));
     }
     let result = select_open_menu_item(pid, identity, value, deadline);
@@ -272,10 +275,12 @@ fn select_collection_candidate(
     deliver_candidate(
         true,
         || {
-            use crate::actions::chain::chain_delivery::DeliveryOutcome;
+            use agent_desktop_core::{DeliveryObservation, DeliveryOutcome};
             match super::container_select::select_within_container(candidate, deadline)? {
                 DeliveryOutcome::NotDelivered => Ok(None),
-                outcome => Ok(Some(outcome.was_verified())),
+                DeliveryOutcome::Satisfied
+                | DeliveryOutcome::Delivered(DeliveryObservation::Verified) => Ok(Some(true)),
+                DeliveryOutcome::Delivered(_) => Ok(Some(false)),
             }
         },
         || press_candidate(candidate, deadline),

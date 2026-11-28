@@ -3,7 +3,10 @@ use crate::actions::action_result::ActionResult;
 use crate::adapter::{NativeHandle, PlatformAdapter};
 use crate::context::CommandContext;
 use crate::ref_action::ref_action_context::RefActionContext;
-use crate::ref_action::ref_action_wait_support::{after_scroll, trace_scroll_error};
+use crate::ref_action::ref_action_wait_support::{
+    note_preparatory_scroll, note_scroll_if, require_route_before_scroll, scroll_was_sent,
+    settled_surfaces, trace_scroll_error,
+};
 use crate::refs::{RefEntry, resolve_saved_ref::resolve_saved_ref};
 use crate::{AdapterError, AppError, actionability};
 use serde_json::json;
@@ -70,14 +73,10 @@ pub(crate) fn dispatch_resolved_landing(
     mut request: ActionRequest,
     lease: &crate::InteractionLease,
 ) -> Result<(ActionResult, NativeHandle), AppError> {
-    let process_instance = target
-        .entry
-        .process
-        .process_instance
-        .as_deref()
-        .filter(|instance| !instance.is_empty())
-        .ok_or_else(|| AdapterError::stale_ref_because("target process instance is unavailable"))?;
-    let expected_process = crate::ProcessIdentity::new(target.entry.process.pid, process_instance);
+    let expected_process =
+        target.entry.process.identity().ok_or_else(|| {
+            AdapterError::stale_ref_because("target process instance is unavailable")
+        })?;
     let mut handle = resolve_saved_ref(target.adapter, target.entry, target.deadline, Some(lease))
         .map_err(mark_pre_dispatch_resolution_failure)
         .inspect_err(|error| {
@@ -89,6 +88,7 @@ pub(crate) fn dispatch_resolved_landing(
         })?;
     crate::ref_action::ref_action_wait_support::trace_resolve_ok(target.context, target.ref_id);
     let initial_target = ResolvedRefAction::new(target, &handle);
+    let mut scrolled = false;
     let preflight = match stable_preflight(&initial_target, &request) {
         Ok(preflight) => preflight,
         Err(error) => {
@@ -98,6 +98,7 @@ pub(crate) fn dispatch_resolved_landing(
             ) {
                 return Err(error.into());
             }
+            require_route_before_scroll(target.adapter, &handle, &request, lease)?;
             let recovered = match target.adapter.scroll_ref_into_view(
                 target.entry,
                 &handle,
@@ -107,25 +108,27 @@ pub(crate) fn dispatch_resolved_landing(
                 Ok(recovered) => recovered,
                 Err(scroll_error) => {
                     trace_scroll_error(&target, &scroll_error);
-                    return Err(
+                    return Err(note_scroll_if(
+                        scroll_was_sent(&scroll_error),
                         crate::ref_action::ref_action_wait_evidence::attach_scroll_recovery_failure(
                             error,
                             &scroll_error,
-                        )
-                        .into(),
-                    );
+                        ),
+                    )
+                    .into());
                 }
             };
+            scrolled = true;
             handle = match recovered {
                 Some(handle) => handle,
                 None => {
                     resolve_saved_ref(target.adapter, target.entry, target.deadline, Some(lease))
-                        .map_err(after_scroll)?
+                        .map_err(note_preparatory_scroll)?
                 }
             };
             let scrolled_target = ResolvedRefAction::new(target, &handle);
             stable_preflight(&scrolled_target, &request)
-                .map_err(|error| after_scroll(into_adapter_error(error)))?
+                .map_err(|error| note_preparatory_scroll(into_adapter_error(error)))?
         }
     };
     if preflight.pointer_delivery == actionability::PointerDelivery::Semantic {
@@ -157,7 +160,7 @@ pub(crate) fn dispatch_resolved_landing(
         ripples,
         &dispatch_result,
     );
-    let mut result = dispatch_result?;
+    let mut result = dispatch_result.map_err(|error| note_scroll_if(scrolled, error))?;
     if raises_surface {
         result.surfaces = settled_surfaces(&final_target, expected_process);
     }
@@ -169,20 +172,6 @@ pub(crate) fn dispatch_resolved_landing(
         )
         .map_err(trace_error_after_delivery)?;
     Ok((result, handle))
-}
-
-/// An action that opens a sheet, menu, or alert leaves the caller staring at a
-/// success envelope with no hint that the application is now waiting on a
-/// dialog. Reporting the overlays saves a round of window archaeology. Purely
-/// informational, so a failed read never disturbs delivered work.
-fn settled_surfaces(
-    target: &ResolvedRefAction<'_>,
-    process: crate::ProcessIdentity,
-) -> Vec<crate::SurfaceInfo> {
-    target
-        .adapter
-        .list_surfaces(process, target.deadline)
-        .unwrap_or_default()
 }
 
 pub(crate) fn mark_pre_dispatch_resolution_failure(error: AdapterError) -> AdapterError {

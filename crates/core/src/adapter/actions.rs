@@ -4,25 +4,39 @@ use crate::{
 };
 
 pub trait ActionOps: Send + Sync {
-    fn headed_requirement_for_ref(
+    /// What a headed action on the element a ref names focuses before it is
+    /// delivered.
+    fn headed_focus_for_ref(
         &self,
         _entry: &crate::RefEntry,
         request: &ActionRequest,
         _deadline: crate::Deadline,
-    ) -> Result<crate::HeadedRequirement, AdapterError> {
-        Ok(request.headed_requirement())
+    ) -> Result<Option<crate::HeadedFocus>, AdapterError> {
+        Ok(request.headed_focus())
     }
 
-    /// What the action on this element needs from the foreground. Core
-    /// refuses a request whose policy denies that focus or cursor use with
-    /// `POLICY_DENIED`, before any other actionability check.
-    fn headed_requirement(
+    /// [`ActionOps::headed_focus_for_ref`] for a resolved element.
+    fn headed_focus(
         &self,
         _handle: &NativeHandle,
         request: &ActionRequest,
         _deadline: crate::Deadline,
-    ) -> Result<crate::HeadedRequirement, AdapterError> {
-        Ok(request.headed_requirement())
+    ) -> Result<Option<crate::HeadedFocus>, AdapterError> {
+        Ok(request.headed_focus())
+    }
+
+    /// The effect the action on this element has beyond the element itself,
+    /// and why, such as a popup or a dialog that takes the user's focus. Core
+    /// refuses a request whose policy does not permit it with `POLICY_DENIED`,
+    /// before any other actionability check, the wait or a scroll, and reports
+    /// the reason as `details.kind`.
+    fn foreground_effect(
+        &self,
+        _handle: &NativeHandle,
+        _request: &ActionRequest,
+        _deadline: crate::Deadline,
+    ) -> Result<Option<crate::DeclaredEffect>, AdapterError> {
+        Ok(None)
     }
 
     fn execute_action(
@@ -34,16 +48,28 @@ pub trait ActionOps: Send + Sync {
         Err(AdapterError::not_supported("execute_action"))
     }
 
+    /// Refuses, from read-only observation, an action the target can never
+    /// take. Core asks before a preparatory scroll, so a final refusal never
+    /// moves the view first. `Ok` means the adapter has no refusal to give.
+    fn refuse_before_scroll(
+        &self,
+        _handle: &NativeHandle,
+        _request: &ActionRequest,
+        _lease: &InteractionLease,
+    ) -> Result<(), AdapterError> {
+        Ok(())
+    }
+
     /// Scroll the element into view. `policy` decides whether a route that
     /// takes the foreground is allowed; a headless policy runs only the routes
     /// that leave it alone.
     fn scroll_into_view(
         &self,
         handle: &NativeHandle,
-        policy: crate::InteractionPolicy,
+        _policy: crate::InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<(), AdapterError> {
-        let _ = (handle, policy, lease);
+        let _ = (handle, lease);
         Err(AdapterError::not_supported("scroll_into_view"))
     }
 

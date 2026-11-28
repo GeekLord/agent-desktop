@@ -237,7 +237,7 @@ pub(crate) fn focus_point_under_lease(
     adapter: &dyn PlatformAdapter,
     context: &CommandContext,
 ) -> Result<bool, AppError> {
-    if !args.headed_requirement.requires_focus() {
+    if !args.focuses_window {
         return Ok(false);
     }
     let Some(ref_id) = args.ref_id else {

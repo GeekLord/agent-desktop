@@ -1,18 +1,90 @@
-use agent_desktop_core::{AdapterError, Deadline};
+use agent_desktop_core::{AdapterError, Deadline, DeliveryObservation, DeliveryOutcome};
 
-use crate::actions::chain::chain_delivery::DeliveryOutcome;
+use crate::actions::DeliveryTracker;
 use crate::tree::AXElement;
 
 const MAX_MENU_SEARCH_NODES: usize = 2_048;
 
-pub(crate) fn show_menu(
+/// Opens the element's context menu through the first accessibility route that
+/// delivers: the element, its containing selectable item, the window's
+/// selected-items button, its children, then its ancestors. An `AXShowMenu`
+/// that reports success without a menu does not end the search: the next route
+/// runs unless the menu has appeared by then, which settles the result as
+/// verified.
+pub(crate) fn show_menu_by_any_route(
     element: &AXElement,
     deadline: Deadline,
 ) -> Result<DeliveryOutcome, AdapterError> {
-    show_menu_on_element(element, deadline)
+    show_menu_after(|| Ok(DeliveryOutcome::NotDelivered), element, deadline)
 }
 
-pub(crate) fn show_menu_on_ancestors(
+/// The same search with `first` tried before the accessibility routes, as a
+/// pointer click is when the pointer is allowed. A `first` that was sent and
+/// showed no menu is one more unverified send: the accessibility routes run
+/// after it unless the menu has appeared by then.
+pub(crate) fn show_menu_after(
+    mut first: impl FnMut() -> Result<DeliveryOutcome, AdapterError>,
+    element: &AXElement,
+    deadline: Deadline,
+) -> Result<DeliveryOutcome, AdapterError> {
+    let pid = crate::system::app::app_ops::pid_from_element(element, deadline);
+    let mut direct = route(show_menu_on_element, element, deadline);
+    let mut after_select = route(select_then_show_menu, element, deadline);
+    let mut selected_items = route(select_then_selected_items_menu, element, deadline);
+    let mut children = route(show_menu_on_children, element, deadline);
+    let mut ancestors = route(show_menu_on_ancestors, element, deadline);
+    first_menu_outcome(
+        &mut [
+            &mut first,
+            &mut direct,
+            &mut after_select,
+            &mut selected_items,
+            &mut children,
+            &mut ancestors,
+        ],
+        &mut || pid.is_some_and(|pid| menu_probe(pid, deadline)),
+    )
+}
+
+fn route<'a>(
+    run: fn(&AXElement, Deadline) -> Result<DeliveryOutcome, AdapterError>,
+    element: &'a AXElement,
+    deadline: Deadline,
+) -> impl FnMut() -> Result<DeliveryOutcome, AdapterError> + 'a {
+    move || {
+        deadline.ensure_remaining()?;
+        run(element, deadline)
+    }
+}
+
+fn first_menu_outcome(
+    routes: &mut [&mut dyn FnMut() -> Result<DeliveryOutcome, AdapterError>],
+    menu_open: &mut dyn FnMut() -> bool,
+) -> Result<DeliveryOutcome, AdapterError> {
+    let mut sent = false;
+    for attempt in routes.iter_mut() {
+        if sent && menu_open() {
+            return Ok(DeliveryOutcome::Delivered(DeliveryObservation::Verified));
+        }
+        match (**attempt)().map_err(|error| {
+            DeliveryTracker::from_delivered_units(usize::from(sent)).annotate(error)
+        })? {
+            DeliveryOutcome::NotDelivered => {}
+            DeliveryOutcome::Delivered(
+                DeliveryObservation::Unverified | DeliveryObservation::Unread,
+            ) => sent = true,
+            settled @ (DeliveryOutcome::Satisfied
+            | DeliveryOutcome::Delivered(DeliveryObservation::Verified)) => return Ok(settled),
+        }
+    }
+    Ok(if sent {
+        DeliveryOutcome::Delivered(DeliveryObservation::Unverified)
+    } else {
+        DeliveryOutcome::NotDelivered
+    })
+}
+
+fn show_menu_on_ancestors(
     element: &AXElement,
     deadline: Deadline,
 ) -> Result<DeliveryOutcome, AdapterError> {
@@ -22,7 +94,7 @@ pub(crate) fn show_menu_on_ancestors(
             return Ok(DeliveryOutcome::NotDelivered);
         };
         let outcome = show_menu_on_element(&ancestor, deadline)?;
-        if outcome.terminates_chain() {
+        if outcome != DeliveryOutcome::NotDelivered {
             return Ok(outcome);
         }
         current = parent(&ancestor, deadline)?;
@@ -30,7 +102,7 @@ pub(crate) fn show_menu_on_ancestors(
     Ok(DeliveryOutcome::NotDelivered)
 }
 
-pub(crate) fn show_menu_on_children(
+fn show_menu_on_children(
     element: &AXElement,
     deadline: Deadline,
 ) -> Result<DeliveryOutcome, AdapterError> {
@@ -39,14 +111,14 @@ pub(crate) fn show_menu_on_children(
         .take(5)
     {
         let outcome = show_menu_on_element(&child, deadline)?;
-        if outcome.terminates_chain() {
+        if outcome != DeliveryOutcome::NotDelivered {
             return Ok(outcome);
         }
     }
     Ok(DeliveryOutcome::NotDelivered)
 }
 
-pub(crate) fn select_then_show_menu(
+fn select_then_show_menu(
     element: &AXElement,
     deadline: Deadline,
 ) -> Result<DeliveryOutcome, AdapterError> {
@@ -56,7 +128,7 @@ pub(crate) fn select_then_show_menu(
     show_menu_on_element(element, deadline)
 }
 
-pub(crate) fn select_then_selected_items_menu(
+fn select_then_selected_items_menu(
     element: &AXElement,
     deadline: Deadline,
 ) -> Result<DeliveryOutcome, AdapterError> {
@@ -116,7 +188,7 @@ fn show_menu_or_press(
     Ok(DeliveryOutcome::NotDelivered)
 }
 
-fn wait_for_new_menu(pid: i32, deadline: Deadline) -> Result<bool, AdapterError> {
+pub(crate) fn wait_for_new_menu(pid: i32, deadline: Deadline) -> Result<bool, AdapterError> {
     let local_end = std::time::Instant::now() + std::time::Duration::from_millis(600);
     loop {
         if menu_probe(pid, deadline) {
@@ -244,3 +316,7 @@ fn parent(element: &AXElement, deadline: Deadline) -> Result<Option<AXElement>, 
 fn prepare(element: &AXElement, deadline: Deadline) -> Result<(), AdapterError> {
     crate::tree::properties::attributes::set_messaging_timeout(element, deadline)
 }
+
+#[cfg(test)]
+#[path = "chain_menu_steps_tests.rs"]
+mod tests;

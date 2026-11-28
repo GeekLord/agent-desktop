@@ -101,7 +101,7 @@ fn headed_point_args(
     snapshot_id: &str,
 ) -> crate::commands::point_resolve::PointResolveArgs<'static> {
     crate::commands::point_resolve::PointResolveArgs {
-        headed_requirement: crate::HeadedRequirement::FocusedWindowAndCursor,
+        focuses_window: true,
         ..point_args(snapshot_id)
     }
 }

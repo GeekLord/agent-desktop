@@ -38,12 +38,16 @@ impl AdapterError {
         self
     }
 
+    /// Adds `details`, merging two objects; a key in `details` wins.
     pub fn with_details(mut self, details: Value) -> Self {
         let retryability = crate::response::retryability::Retryability::from_details(&details);
         if retryability != crate::response::retryability::Retryability::Unspecified {
             self.retryability = retryability;
         }
-        self.details = Some(details);
+        self.details = Some(crate::response::details::merged(
+            self.details.take(),
+            details,
+        ));
         self
     }
 
@@ -134,9 +138,7 @@ impl AdapterError {
 
     /// As [`Self::ambiguous_process_target`], but for a caller that already
     /// has a richer details object of its own (candidate summaries, a
-    /// truncation flag) - built directly rather than through the plain
-    /// constructor's own details, which `with_details` would otherwise
-    /// discard wholesale in favor of this one.
+    /// truncation flag), which becomes the whole details.
     pub fn ambiguous_process_target_with_details(
         message: impl Into<String>,
         pids: &[crate::ProcessId],
@@ -146,7 +148,8 @@ impl AdapterError {
         Self::new(ErrorCode::AmbiguousTarget, message)
             .with_suggestion(format!(
                 "{} running instances match (pids {numeric:?}); this command selects a \
-                 process by name and has no pid or instance flag to disambiguate",
+                 process by name only. Quit all but one instance yourself (list-apps \
+                 shows them), then retry",
                 pids.len()
             ))
             .with_details(details)
@@ -195,7 +198,7 @@ impl AdapterError {
 
     pub fn timeout(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Timeout, message)
-            .with_suggestion("The target application may be busy or unresponsive")
+            .with_suggestion("The operation did not finish within its deadline; retry once, and if it repeats report the timeout instead of retrying")
     }
 
     pub fn notification_not_found(index: usize) -> Self {

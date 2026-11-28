@@ -35,6 +35,7 @@ mod imp {
     use crate::actions::mutation::{classify_success, classify_write};
     use crate::actions::scroll::vertical_scroll;
     use crate::actions::select_combo::{COMBO_SELECT_LABEL, native_combo, select_native_combo};
+    use crate::actions::select_container::{container_route_applies, realize_named_item};
     use crate::actions::select_locate::{Located, RealizeScan, RealizeScrollStep, locate};
     use crate::actions::select_search::{
         find_named_selection_item, name_matches, realize_scroll_step, scroll_to_position,
@@ -86,7 +87,9 @@ mod imp {
     /// the sweep is `AMBIGUOUS_TARGET`. The row is read from the window that
     /// realized it: a sweep that scrolled past the row returns the list to the
     /// window the row was sighted in and reads it again there, so a row that
-    /// left the viewport is still found.
+    /// left the viewport is still found. When no scroll window realizes the
+    /// row, the container's own item lookup realizes it, on a policy that
+    /// allows a foreground effect.
     fn find_item(
         element: &UIAElement,
         value: &str,
@@ -100,6 +103,10 @@ mod imp {
                 &[crate::actions::scroll::SCROLL_LABEL],
                 policy,
             )),
+            Located::Absent if container_route_applies(false, policy.allow_focus_steal) => {
+                realize_named_item(element, value, deadline)?
+                    .ok_or_else(|| element_not_found(value))
+            }
             Located::Absent => Err(element_not_found(value)),
         }
     }
@@ -186,13 +193,13 @@ mod imp {
         let mut pattern = || observe(pattern_select(item)?);
         agent_desktop_core::execute_chain(
             &mut offered([
-                rung(SELECT_ITEM_LABEL, true, false, &mut legacy),
                 rung(
                     SELECT_LABEL,
                     selection_item_available(item),
                     true,
                     &mut pattern,
                 ),
+                rung(SELECT_ITEM_LABEL, true, false, &mut legacy),
             ]),
             policy,
             deadline,

@@ -1,7 +1,7 @@
 use agent_desktop_core::{
     AccessibilityNode, ActionOps, AdapterError, ClipboardContent, ClipboardFormat, Deadline,
-    DragParams, ElementState, InputOps, InteractionLease, InteractionPolicy, KeyCombo, LiveElement,
-    MouseEvent, NativeHandle, ObservationOps, ObservationRequest, ObservationRoot, OperationReport,
+    DragParams, ElementState, InputOps, InteractionLease, KeyCombo, LiveElement, MouseEvent,
+    NativeHandle, ObservationOps, ObservationRequest, ObservationRoot, OperationReport,
     ProcessIdentity, Rect, RefEntry, SnapshotSurface, SurfaceInfo, TreeOptions, WindowFilter,
     WindowInfo,
 };
@@ -228,6 +228,21 @@ impl ObservationOps for WindowsAdapter {
     }
 }
 impl ActionOps for WindowsAdapter {
+    fn foreground_effect(
+        &self,
+        _handle: &NativeHandle,
+        request: &agent_desktop_core::actions::action_request::ActionRequest,
+        _deadline: Deadline,
+    ) -> Result<Option<agent_desktop_core::DeclaredEffect>, AdapterError> {
+        Ok(match request.action {
+            agent_desktop_core::Action::SetFocus => Some(agent_desktop_core::DeclaredEffect {
+                effect: agent_desktop_core::Effect::FocusSteal,
+                kind: "focus",
+            }),
+            _ => None,
+        })
+    }
+
     fn execute_action(
         &self,
         handle: &NativeHandle,
@@ -240,7 +255,7 @@ impl ActionOps for WindowsAdapter {
     fn scroll_into_view(
         &self,
         handle: &NativeHandle,
-        policy: InteractionPolicy,
+        policy: agent_desktop_core::InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<(), AdapterError> {
         crate::actions::scroll_into_view::scroll_into_view_outcome(handle, lease, policy)

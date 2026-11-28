@@ -80,7 +80,10 @@ is one of `unknown`, `safe` or `unsafe`, and it follows from `delivery`:
 
 `unknown` means the command established nothing about delivery. A failure of a
 mutating command that carries no delivery evidence, such as a `TIMEOUT` on an
-operation that may already have landed, keeps it. A read-only command sends
+operation that may already have landed, keeps it. An element action that
+fails with no disposition and a code other than `ACTION_NOT_SUPPORTED` or
+`INVALID_ARGS` is reported as `delivery_uncertain` and `unsafe`, because the
+adapter call may already have written. A read-only command sends
 nothing and invalid arguments never reach the application, so their errors, and
 a lookup failure such as `APP_NOT_FOUND`, carry `not_delivered`. Treat `unknown`
 as not safe to retry automatically: read `error.code` and the message, and
@@ -90,7 +93,7 @@ choose a recovery strategy only when `disposition.retry` is `safe`.
 
 Stateful ref actions (`set-value`, `type`, `clear`, `check`, `uncheck`, `toggle`, `expand`, and `collapse`) now reject observed postcondition contradictions after one delivery attempt. Readback failures preserve the adapter's error code and carry `details.kind: "post_action_verification"`. Missing evidence alone remains a successful `delivered_unverified` result with `details.verification_scope: "unavailable"`; neither that result nor verified element state proves application-level persistence.
 
-macOS mutation errors that do not prove non-delivery stop fallback chains with an unsafe retry disposition. This affects activation, selection, disclosure, scrolling, and window operations; an unchanged or unreadable state is not proof that a mutation was never delivered. Value-writing chains also stop after unverified delivery instead of applying a second mechanism. Failures after preparatory scrolling carry `details.preparatory_scroll`, which records that the view may have changed. Their retry disposition follows the failure: a refusal that sent nothing is `not_delivered` and safe to retry, and any other failure keeps its own disposition.
+macOS mutation errors that do not prove non-delivery stop fallback chains with an unsafe retry disposition. This affects activation, selection, disclosure, scrolling, and window operations; an unchanged or unreadable state is not proof that a mutation was never delivered. Value-writing chains also stop after unverified delivery instead of applying a second mechanism. Failures after preparatory scrolling carry `details.preparatory_scroll`, which records that the view may have changed. A scroll changes the view, so an error after it is never `not_delivered`: a failure with no send evidence is `delivery_uncertain` and unsafe to retry, and a disposition that reports a send keeps its own value. An adapter that can refuse an action by reading alone does so before the scroll, so a refused action leaves the view where it was.
 
 Inspect `disposition.retry` before retrying or choosing an alternative action, regardless of `error.code`. An error may include `post_state` and `postcondition_satisfied` without erasing the original execution failure. The same verification rules apply to FFI ref actions; the C ABI is unchanged. The Rust `ActionResult::from_execution` constructor now takes only action and steps and returns an infallible result; live verification belongs to `execute_verified_action`.
 
@@ -198,7 +201,7 @@ Every ref is re-identified from its stored entry or refused, and `details.kind` 
 | `identity_unproven` | `AMBIGUOUS_TARGET` | The snapshot did not prove the ref unique, because it ran out of budget before it read the whole window, so nothing is searched. The snapshot carries `data.identity_unproven`. Retake it with a larger `--timeout-ms` and pass the same value to the action, which reads the whole window again. |
 | `element_token_required` | `STALE_REF` | The platform re-identifies this ref only through the element token captured with it, and the ref carries none it can read. Nothing is searched, so this does not say the element is gone. Take a fresh snapshot and use the new ref |
 
-The sixth outcome is `resolution_identity_unknown`, which carries `TIMEOUT`: a live field could not be read, so the identity count stayed unproven. It is retryable. Linux menu and tray refs report the same kind as `STALE_REF`.
+The sixth outcome is `resolution_identity_unknown`, which carries `TIMEOUT`: a live field could not be read, so the identity count stayed unproven. It is retryable. A large window can need more time than the budget allows, so retry the same command with a larger `--timeout-ms`. Linux menu and tray refs report the same kind as `STALE_REF`.
 
 After the core resolver chooses the element, the platform adapter lands it, and a landing failure keeps the adapter's own `details.kind` (for example `resolve_no_candidate` on Linux and Windows, or `resolution_complete_absence` on macOS). The platform skills list those kinds. `saved_ref_absent`, `saved_ref_ambiguous`, `identity_not_unique`, `retained_object_stale` and `element_token_required` carry `details.retryable: false`, because waiting cannot change the answer. Every one of these is `not_delivered`.
 
@@ -213,17 +216,29 @@ After the core resolver chooses the element, the platform adapter lands it, and 
 | `AMBIGUOUS_TARGET` | Ref recovery matched multiple plausible targets |
 | `SNAPSHOT_NOT_FOUND` | Snapshot ID is missing or expired |
 | `SANDBOX_NOT_FOUND` | No sandbox has that name; run `agent-desktop sandbox list` to see the sandboxes that exist |
-| `POLICY_DENIED` | The interaction policy does not permit an effect of the operation; nothing was sent. `details.effect` names it when one effect decided: `focus_steal`, `cursor_move` or `clipboard_write`. Rerun with `--headed` to permit them |
+| `POLICY_DENIED` | The interaction policy does not permit an effect of the operation; nothing was sent. `details.effect` names it when one effect decided: `focus_steal`, `cursor_move` or `clipboard_write`. A refusal of an effect on the user's foreground also carries `details.check: "foreground"` and `details.foreground_effect: true`. Before dispatch, `details.mechanisms` is the action name and `details.kind` is the reason: `shows_menu`, `opens_dialog`, `opens_popup` or `focus`. When a delivery route is held back, `details.mechanisms` names the withheld route labels. A ref action whose remaining routes all deliver nothing, while one was held back, is `POLICY_DENIED`, not `ACTION_FAILED`, on every platform. Rerun with `--headed` to permit them |
 | `ACTION_FAILED` | Action rejected, or its observed result contradicted the request |
 | `ACTION_NOT_SUPPORTED` | The target does not expose the requested action |
 | `APP_UNRESPONSIVE` | The matching application stopped responding |
 | `PLATFORM_NOT_SUPPORTED` | Adapter method not implemented on this platform |
-| `TIMEOUT` | Wait condition expired, or a live identity read stayed incomplete until the deadline |
+| `TIMEOUT` | Wait condition expired, or a live identity read stayed incomplete until the deadline. A locator that could not prove its result carries `details.kind: "locator_incomplete"`; see below |
 | `INVALID_ARGS` | Invalid argument values |
 | `WINDOW_NOT_FOUND` | The requested window does not exist, including a `screenshot --window-id` that matches no window; the disposition is `not_delivered` |
 | `NOTIFICATION_NOT_FOUND` | The notification ID was not found |
 | `INTERNAL` | Unexpected error or caught panic |
 
+### Locator incomplete
+
+`find` and the other locator commands return `TIMEOUT` with `details.kind: "locator_incomplete"` when the search could not prove its result. `details.cause` says why:
+
+| `details.cause` | Meaning | `details.retryable` |
+|------|---------|------|
+| `deadline` | The search ran out of time. Retry with a larger `--timeout-ms`. | `true` |
+| `unreadable_elements` | The search finished in time, but some native reads failed, so part of the tree is unknown. More time does not help. | `false` |
+| `traversal_limit` | A fixed traversal limit (node, edge, child, text or depth) was hit. More time does not help. | `false` |
+
+For the last two, narrow the query with `--role` or `--name`, or run `snapshot`, which returns the readable part of the tree with `complete: false`. `details.observed_matches` and `details.query_stats` carry the evidence. The disposition is `not_delivered`.
+
 ## Exit codes
 
-`0` success, `1` structured error (JSON on stdout), `2` command-line parse error (the envelope is still printed, with `INVALID_ARGS`).
+`0` success, `1` structured error (JSON on stdout), `2` command-line parse error (the envelope is still printed, with `INVALID_ARGS`). A parse error's `error.suggestion` carries clap's `tip:` lines and the command's `Usage:` line when clap printed them, then, when the command is known, a pointer to `agent-desktop <command> --help`.
