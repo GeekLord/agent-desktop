@@ -1,4 +1,4 @@
-//! Bounded SelectionItem descendant search and its realize scroll steps (A19-7).
+//! Bounded SelectionItem descendant search and scroll steps for realizing items (A19-7).
 
 use agent_desktop_core::{AdapterError, Deadline, ErrorCode, normalize_search_text};
 
@@ -14,6 +14,7 @@ fn select_node_budget_has_room(visited: usize, pending: usize, staged: usize) ->
 fn names_equal(left: &str, right: &str) -> bool {
     normalize_search_text(left) == normalize_search_text(right)
 }
+
 /// Second same-name SelectionItem is `AMBIGUOUS_TARGET`, never a silent pick.
 pub(crate) fn accept_selection_match(already_found: bool) -> Result<(), AdapterError> {
     if already_found {
@@ -126,7 +127,7 @@ mod imp {
         })
     }
 
-    /// Scrolls the container back to a vertical position it reported earlier; `false` when it cannot.
+    /// Scrolls the container to a vertical position it reported earlier; `false` when it has no way to.
     pub(crate) fn scroll_to_position(
         pattern: &UIScrollPattern,
         position: f64,

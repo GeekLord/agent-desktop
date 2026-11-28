@@ -367,3 +367,7 @@ mod gate_tests;
 #[cfg(test)]
 #[path = "live_read_states_complete_tests.rs"]
 mod states_complete_tests;
+
+#[cfg(all(test, target_os = "windows"))]
+#[path = "live_read_seam_tests.rs"]
+mod seam_tests;

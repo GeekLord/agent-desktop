@@ -89,14 +89,14 @@ mod imp {
         InteractionPolicy, SELECT_LABEL, SELECT_SUGGESTION, UIAElement, VERIFY_TIMEOUT,
         annotate_container, collapse_container, offered, run_expand, rung,
     };
-    use crate::actions::chain::{legacy_select, poll_until};
+    use crate::actions::chain::{after_delivery, legacy_select, poll_until};
     use crate::actions::click::SELECT_ITEM_LABEL;
     use crate::actions::disclosure::ExpandKind;
     use crate::actions::mutation::{classify_success, classify_write};
-    use crate::actions::scroll::vertical_scroll;
+    use crate::actions::scroll::{SCROLL_LABEL, vertical_scroll};
     use crate::actions::select_combo::{COMBO_SELECT_LABEL, native_combo, select_native_combo};
-    use crate::actions::select_container::{container_route_applies, realize_named_item};
-    use crate::actions::select_locate::{Located, RealizeScan, RealizeScrollStep, locate};
+    use crate::actions::select_container::{Realization, realize_named_item};
+    use crate::actions::select_locate::{ItemSource, Located, RealizeScrollStep, locate};
     use crate::actions::select_search::{
         find_named_selection_item, name_matches, realize_scroll_step, scroll_to_position,
         selection_item_available,
@@ -128,8 +128,12 @@ mod imp {
             let mut expand = || expand_container(element);
             run_expand(&mut expand, policy, deadline)?;
         }
-        let selected = find_item(element, value, policy, deadline)
-            .and_then(|item| select_item(&item, policy, deadline));
+        let selected = find_item(element, value, policy, deadline).and_then(|(item, realized)| {
+            select_item(&item, policy, deadline).map_err(|error| match realized {
+                true => after_delivery(error),
+                false => error,
+            })
+        });
         match selected {
             Err(error) if collapsed => {
                 let mut collapse = || collapse_pattern(element);
@@ -143,44 +147,15 @@ mod imp {
         }
     }
 
-    /// Finds the item, sweeping the scroll range when the policy allows the
-    /// scroll that realizes a virtualized list's rows. A second match across
-    /// the sweep is `AMBIGUOUS_TARGET`. The row is read from the window that
-    /// realized it: a sweep that scrolled past the row returns the list to the
-    /// window the row was sighted in and reads it again there, so a row that
-    /// left the viewport is still found. When no scroll window realizes the
-    /// row, the container's own item lookup realizes it, on a policy that
-    /// allows a foreground effect.
-    fn find_item(
-        element: &UIAElement,
-        value: &str,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<UIAElement, AdapterError> {
-        let mut source = ContainerScan::new(element, value, deadline);
-        match locate(&mut source, policy.allow_focus_steal)? {
-            Located::Found(item) => Ok(item),
-            Located::ScrollDenied => Err(agent_desktop_core::mechanisms_denied(
-                &[crate::actions::scroll::SCROLL_LABEL],
-                policy,
-            )),
-            Located::Absent if container_route_applies(false, policy.allow_focus_steal) => {
-                realize_named_item(element, value, deadline)?
-                    .ok_or_else(|| element_not_found(value))
-            }
-            Located::Absent => Err(element_not_found(value)),
-        }
-    }
-
-    /// The rows one container has realized, read as a scroll window over them.
-    struct ContainerScan<'a> {
+    /// The selection items of one container, read through UI Automation.
+    struct ContainerItems<'a> {
         element: &'a UIAElement,
         value: &'a str,
         deadline: Deadline,
         scroll: Option<UIScrollPattern>,
     }
 
-    impl<'a> ContainerScan<'a> {
+    impl<'a> ContainerItems<'a> {
         fn new(element: &'a UIAElement, value: &'a str, deadline: Deadline) -> Self {
             Self {
                 element,
@@ -191,14 +166,14 @@ mod imp {
         }
     }
 
-    impl RealizeScan for ContainerScan<'_> {
+    impl ItemSource for ContainerItems<'_> {
         type Item = UIAElement;
 
         fn scan(&mut self, prior: Option<&UIAElement>) -> Result<Option<UIAElement>, AdapterError> {
             find_named_selection_item(self.element, self.value, self.deadline, prior)
         }
 
-        fn hides_rows_behind_a_scroll(&self) -> bool {
+        fn hides_items_behind_a_scroll(&self) -> bool {
             self.scroll.is_some()
         }
 
@@ -221,18 +196,37 @@ mod imp {
                 None => Ok(false),
             }
         }
+
+        fn realize(&mut self) -> Result<Option<(UIAElement, Realization)>, AdapterError> {
+            realize_named_item(self.element, self.value, self.deadline)
+        }
     }
 
-    fn element_not_found(value: &str) -> AdapterError {
-        AdapterError::new(
-            ErrorCode::ElementNotFound,
-            format!(
-                "No selection item matched the requested value ({} chars)",
-                value.chars().count()
-            ),
-        )
-        .with_disposition(DeliverySemantics::not_delivered())
-        .with_suggestion(SELECT_SUGGESTION)
+    /// Locates the named selection item inside `element`, allowing scroll
+    /// realization when `policy` permits focus steal.
+    fn find_item(
+        element: &UIAElement,
+        value: &str,
+        policy: InteractionPolicy,
+        deadline: Deadline,
+    ) -> Result<(UIAElement, bool), AdapterError> {
+        let mut items = ContainerItems::new(element, value, deadline);
+        match locate(&mut items, policy.allow_focus_steal)? {
+            Located::Found { item, realized } => Ok((item, realized)),
+            Located::ScrollDenied => Err(agent_desktop_core::mechanisms_denied(
+                &[SCROLL_LABEL],
+                policy,
+            )),
+            Located::Absent => Err(AdapterError::new(
+                ErrorCode::ElementNotFound,
+                format!(
+                    "No selection item matched the requested value ({} chars)",
+                    value.chars().count()
+                ),
+            )
+            .with_disposition(DeliverySemantics::not_delivered())
+            .with_suggestion(SELECT_SUGGESTION)),
+        }
     }
 
     fn select_item(
