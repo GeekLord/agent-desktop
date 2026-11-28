@@ -19,7 +19,7 @@ fn test_run_from_ref_multiple_drill_downs_accumulate() {
         named("group", "Toolbar"),
         named("button", "FromE2"),
     ))
-    .with_token("axtok1:button-Toolbar");
+    .with_token("token:axtok1:button-Toolbar");
     let second = run_from_ref(&adapter_two, &drill_opts(), "@e2", Some(&snapshot_id)).unwrap();
     let from_e2_ref = second.tree.children[0]
         .ref_id
@@ -67,7 +67,7 @@ fn test_drilldown_refmap_matches_golden_fixture() {
     let _ = run_from_ref(&adapter, &drill_opts(), "@e1", Some(&snapshot_id)).unwrap();
 
     let toolbar_subtree = with_child(named("group", "Toolbar"), named("button", "Back"));
-    let adapter = StubAdapter::new(toolbar_subtree).with_token("axtok1:group-Toolbar");
+    let adapter = StubAdapter::new(toolbar_subtree).with_token("token:axtok1:group-Toolbar");
     let _ = run_from_ref(&adapter, &drill_opts(), "@e2", Some(&snapshot_id)).unwrap();
 
     let on_disk = load_latest();

@@ -59,12 +59,7 @@ pub(crate) fn addressability(evidence: &LocatorEvidence) -> (bool, bool) {
 pub(crate) fn selects_tokenless_entry(tree: &ObservedTree) -> bool {
     tree.nodes.iter().any(|node| {
         let (addressable, settled) = addressability(&node.evidence);
-        (addressable || !settled)
-            && !node
-                .evidence
-                .identifiers
-                .retained_object()
-                .is_some_and(crate::refs::ref_identity::is_element_token)
+        (addressable || !settled) && node.evidence.identifiers.element_token().is_none()
     })
 }
 
@@ -112,7 +107,10 @@ pub(crate) fn ref_entry(
                 .retained_object()
                 .map(str::to_owned),
             role: role.clone(),
-            name: node.evidence.name.meaningful_string(),
+            name: node.evidence.name.meaningful_string().filter(|_| {
+                !(node.evidence.value.is_unknown()
+                    && crate::tree::roles::is_mutable_value_role(&role))
+            }),
             value: node.evidence.value.meaningful_string(),
             description: node.evidence.description.meaningful_string(),
             native_id: identifier,

@@ -8,13 +8,13 @@ use std::time::Instant;
 #[cfg(target_os = "macos")]
 use super::resolve::resolve_classify::identity_summary_for_message;
 #[cfg(target_os = "macos")]
-use super::resolve::resolve_errors::element_token_required;
-#[cfg(target_os = "macos")]
 use super::resolve::resolve_read_context::ResolveReadContext;
 #[cfg(target_os = "macos")]
 use super::resolve::resolve_roots::{candidate_roots, source_window_scope_required};
 #[cfg(target_os = "macos")]
 use super::resolve::resolve_search::find_entry_by_path;
+#[cfg(target_os = "macos")]
+use agent_desktop_core::refs::resolve_errors::element_token_required;
 
 /// Re-identifies a saved ref by the element token captured with it, and refuses
 /// any ref that carries none: a token names the exact element, so no path or
@@ -267,6 +267,7 @@ pub(super) mod resolve_search;
 pub(super) mod resolve_source_app;
 pub(crate) mod retained;
 pub(super) mod retained_resolve;
+mod retained_window;
 #[cfg(test)]
 #[path = "resolve_tests.rs"]
 mod tests;

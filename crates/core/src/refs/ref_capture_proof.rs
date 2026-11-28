@@ -68,36 +68,32 @@ impl<'a> CaptureProof<'a> {
     /// the projection, which skips no child the observation kept even when the
     /// native indices have gaps.
     pub(crate) fn proof_at(&self, entry: &RefEntry, path: &[usize]) -> IdentityProof {
-        let Some(mut index) = self.start else {
-            return IdentityProof::Unproven;
-        };
-        let Some(prefix) = self
-            .observed
-            .nodes
-            .get(index)
-            .map(|node| node.path.as_slice())
-        else {
-            return IdentityProof::Unproven;
-        };
-        let Some(steps) = path.strip_prefix(prefix) else {
-            return IdentityProof::Unproven;
-        };
-        for step in steps {
-            match self
-                .observed
-                .nodes
-                .get(index)
-                .and_then(|node| node.children.get(*step))
-            {
-                Some(child) => index = *child as usize,
-                None => return IdentityProof::Unproven,
-            }
+        match self.node_at(path) {
+            Some(index) => self.proof_of_node(entry, index),
+            None => IdentityProof::Unproven,
         }
-        self.proof_of_node(entry, index)
     }
 
     pub(crate) fn proves(&self, entry: &RefEntry, path: &[usize]) -> bool {
         self.proof_at(entry, path).is_unique()
+    }
+
+    /// Whether the node allocated at `path` left its value unread, so a name
+    /// it reports cannot be told apart from that value.
+    pub(crate) fn value_unread_at(&self, path: &[usize]) -> bool {
+        self.node_at(path)
+            .and_then(|index| self.observed.nodes.get(index))
+            .is_some_and(|node| node.evidence.value.is_unknown())
+    }
+
+    fn node_at(&self, path: &[usize]) -> Option<usize> {
+        let mut index = self.start?;
+        let prefix = self.observed.nodes.get(index)?.path.as_slice();
+        let steps = path.strip_prefix(prefix)?;
+        for step in steps {
+            index = *self.observed.nodes.get(index)?.children.get(*step)? as usize;
+        }
+        Some(index)
     }
 
     pub(crate) fn proves_node(&self, entry: &RefEntry, index: usize) -> bool {

@@ -341,3 +341,7 @@ fn a_skipped_native_sibling_does_not_unprove_the_refs_after_it() {
 
     assert_eq!(flags(root, &observed), [true, true]);
 }
+
+#[cfg(test)]
+#[path = "ref_unread_value_tests.rs"]
+mod unread_value;
