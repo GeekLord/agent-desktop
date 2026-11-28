@@ -1,3 +1,4 @@
+use crate::actions::witnessed_action::{PendingWitness, Witnessed};
 use crate::system::front_guard::DispatchMark;
 use crate::system::front_pending::FrontPending;
 use crate::{
@@ -15,7 +16,7 @@ const ACTION_SETTLE: std::time::Duration = std::time::Duration::from_millis(250)
 /// from the target's capabilities before it writes, so nothing was sent. Any
 /// other error came from a call that may already have written, so delivery is
 /// uncertain and a retry is unsafe. An error that has a disposition keeps it.
-fn settle_disposition(error: AdapterError) -> AdapterError {
+pub(crate) fn settle_disposition(error: AdapterError) -> AdapterError {
     if error.disposition != DeliverySemantics::unknown() {
         return error;
     }
@@ -39,29 +40,34 @@ pub fn execute_verified_action(
     request: ActionRequest,
     lease: &InteractionLease,
 ) -> Result<ActionResult, AdapterError> {
-    execute_verified_deferred(adapter, handle, request, lease).0
+    let deadline = lease.deadline();
+    let (result, pending, _front) = execute_verified_deferred(adapter, handle, request, lease)?;
+    Ok(match pending {
+        Some(pending) => pending.settle(adapter, handle, deadline, result),
+        None => result,
+    })
 }
 
-/// As [`execute_verified_action`], with the rest of the front watch a spawned
-/// helper can owe: the caller runs it once it has released the lease.
+/// As [`execute_verified_action`], but a witness read still owed after the
+/// delivery is returned instead of run, so the caller reads it once it has
+/// released the interaction lease.
 pub(crate) fn execute_verified_deferred(
     adapter: &dyn PlatformAdapter,
     handle: &NativeHandle,
     request: ActionRequest,
     lease: &InteractionLease,
-) -> (Result<ActionResult, AdapterError>, Option<FrontPending>) {
+) -> Result<(ActionResult, Option<PendingWitness>, Option<FrontPending>), AdapterError> {
     if !request.action.can_open_window() {
-        return (
-            run_verified_action(adapter, handle, request, lease, &DispatchMark::default()),
-            None,
-        );
+        let (result, pending) =
+            run_verified_action(adapter, handle, request, lease, &DispatchMark::default());
+        return result.map(|result| (result, pending, None));
     }
     let policy = request.policy;
     let target = request.expected_process.as_ref().map_or_else(
         crate::system::front_target::FrontTarget::default,
         |process| crate::system::front_target::FrontTarget::of_process(adapter, process.pid.get()),
     );
-    let guarded = crate::system::front_guard::guarded_deferred(
+    let (result, front, front_pending) = crate::system::front_guard::guarded_deferred(
         adapter,
         policy,
         lease,
@@ -71,23 +77,43 @@ pub(crate) fn execute_verified_deferred(
             after_release: true,
         },
         |mark| run_verified_action(adapter, handle, request, lease, mark),
-    );
-    let (result, front, pending) = match guarded {
-        Ok(guarded) => guarded,
-        Err(error) => return (Err(error), None),
-    };
-    let result = result.map_err(|mut error| {
+    )?;
+    let (result, pending) = result;
+    let mut result = result.map_err(|mut error| {
         front.note_in_error(&mut error);
         error
-    });
-    let result = result.map(|mut result| {
-        front.note_in(&mut result.details);
-        result
-    });
-    (result, pending)
+    })?;
+    front.note_in(&mut result.details);
+    Ok((result, pending, front_pending))
 }
 
 fn run_verified_action(
+    adapter: &dyn PlatformAdapter,
+    handle: &NativeHandle,
+    request: ActionRequest,
+    lease: &InteractionLease,
+    mark: &DispatchMark,
+) -> Witnessed {
+    let action = request.action.clone();
+    if action.witnesses_effect() {
+        return crate::actions::witnessed_action::dispatch_witnessed(
+            adapter, handle, request, lease,
+        );
+    }
+    if !action.requires_state_readback() {
+        let result = adapter
+            .execute_action(handle, request, lease)
+            .map_err(settle_disposition);
+        mark.dispatched();
+        return (result, None);
+    }
+    (
+        run_readback_action(adapter, handle, request, lease, mark),
+        None,
+    )
+}
+
+fn run_readback_action(
     adapter: &dyn PlatformAdapter,
     handle: &NativeHandle,
     mut request: ActionRequest,
@@ -95,13 +121,6 @@ fn run_verified_action(
     mark: &DispatchMark,
 ) -> Result<ActionResult, AdapterError> {
     let action = request.action.clone();
-    if !action.requires_state_readback() {
-        let result = adapter
-            .execute_action(handle, request, lease)
-            .map_err(settle_disposition);
-        mark.dispatched();
-        return result;
-    }
     let deadline = lease.deadline();
     let before = matches!(action, Action::TypeText(_) | Action::Toggle)
         .then(|| adapter.get_live_element(handle, deadline).ok())

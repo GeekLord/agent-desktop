@@ -1,9 +1,9 @@
 use agent_desktop_core::{
-    AccessibilityNode, ActionOps, ActionRequest, ActionResult, AdapterError, AppInventory,
-    ClipboardContent, ClipboardFormat, Deadline, DragParams, ElementState, HitTestResult, InputOps,
-    InteractionLease, KeyCombo, LiveElement, MouseEvent, NativeHandle, ObservationOps,
-    ObservationRequest, ObservationRoot, ObservedTree, OperationReport, Point, ProcessIdentity,
-    Rect, RefEntry, SnapshotSurface, SurfaceInfo, TreeOptions, WindowFilter, WindowInfo,
+    AccessibilityNode, AdapterError, AppInventory, ClipboardContent, ClipboardFormat, Deadline,
+    DragParams, EffectWitness, ElementState, HitTestResult, InputOps, InteractionLease, KeyCombo,
+    LiveElement, MouseEvent, NativeHandle, ObservationOps, ObservationRequest, ObservationRoot,
+    ObservedTree, OperationReport, Point, ProcessIdentity, Rect, RefEntry, SnapshotSurface,
+    SurfaceInfo, TreeOptions, WindowFilter, WindowInfo,
 };
 
 use crate::system::SharedBus;
@@ -87,6 +87,14 @@ impl ObservationOps for LinuxAdapter {
         deadline: Deadline,
     ) -> Result<Option<String>, AdapterError> {
         crate::tree::get_live_value(self.bus(), handle, deadline)
+    }
+
+    fn read_effect_witness(
+        &self,
+        handle: &NativeHandle,
+        deadline: Deadline,
+    ) -> Result<EffectWitness, AdapterError> {
+        crate::tree::read_effect_witness(self.bus(), handle, deadline)
     }
 
     fn get_live_state(
@@ -235,83 +243,6 @@ impl ObservationOps for LinuxAdapter {
     }
 }
 
-impl LinuxAdapter {
-    fn deliver(
-        &self,
-        handle: &NativeHandle,
-        request: ActionRequest,
-        lease: &InteractionLease,
-    ) -> Result<ActionResult, AdapterError> {
-        let target = crate::tree::atspi_element(handle)
-            .ok()
-            .map(|element| element.pid());
-        let result = match crate::system::tray::target_of(handle) {
-            Some(target) => crate::system::tray::execute(target, request, lease),
-            None => {
-                let outcome = crate::tree::atspi_element(handle)
-                    .ok()
-                    .filter(|element| crate::system::shell::is_shell_element(element))
-                    .and_then(|element| {
-                        crate::system::shell::deliver::deliver(self.bus(), element, &request, lease)
-                    });
-                match outcome {
-                    Some(result) => result,
-                    None => crate::actions::execute_action(self.bus(), handle, request, lease),
-                }
-            }
-        };
-        crate::system::interaction::action_clock::mark_outcome(target, &result);
-        result
-    }
-}
-
-impl ActionOps for LinuxAdapter {
-    fn foreground_effect(
-        &self,
-        handle: &NativeHandle,
-        request: &ActionRequest,
-        deadline: Deadline,
-    ) -> Result<Option<agent_desktop_core::DeclaredEffect>, AdapterError> {
-        crate::actions::foreground::foreground_effect(self.bus(), handle, request, deadline)
-    }
-
-    fn scroll_ref_into_view(
-        &self,
-        entry: &agent_desktop_core::RefEntry,
-        handle: &NativeHandle,
-        _policy: agent_desktop_core::InteractionPolicy,
-        lease: &InteractionLease,
-    ) -> Result<Option<NativeHandle>, AdapterError> {
-        crate::actions::scroll::scroll_ref::scroll(self.bus(), entry, handle, lease)
-    }
-
-    fn execute_action(
-        &self,
-        handle: &NativeHandle,
-        request: ActionRequest,
-        lease: &InteractionLease,
-    ) -> Result<ActionResult, AdapterError> {
-        self.deliver(handle, request, lease)
-    }
-
-    fn refuse_before_scroll(
-        &self,
-        handle: &NativeHandle,
-        request: &ActionRequest,
-        lease: &InteractionLease,
-    ) -> Result<(), AdapterError> {
-        crate::actions::refuse_before_scroll(self.bus(), handle, request, lease)
-    }
-
-    fn scroll_into_view(
-        &self,
-        handle: &NativeHandle,
-        _policy: agent_desktop_core::InteractionPolicy,
-        lease: &InteractionLease,
-    ) -> Result<(), AdapterError> {
-        crate::actions::before_pointer(crate::actions::scroll_into_view(self.bus(), handle, lease))
-    }
-}
 impl InputOps for LinuxAdapter {
     fn physical_pointer_refusal(&self) -> Option<AdapterError> {
         match crate::input::backend::backend() {
@@ -345,12 +276,7 @@ impl InputOps for LinuxAdapter {
         crate::input::deliver::drag(&params, lease)
     }
 
-    fn key_event(
-        &self,
-        _combo: &KeyCombo,
-        _down: bool,
-        _lease: &InteractionLease,
-    ) -> Result<(), AdapterError> {
+    fn key_event(&self, _: &KeyCombo, _: bool, _: &InteractionLease) -> Result<(), AdapterError> {
         Err(crate::input::standalone::reject_standalone(
             "key-down/key-up",
         ))

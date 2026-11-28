@@ -13,7 +13,7 @@ use crate::system::window::window_ops::windows_of_process;
 use crate::system::{REGISTRY_ROOT_PATH, SharedBus, within};
 use crate::tree::menu::observe_menu::{rooted, scan_walk_structure};
 use crate::tree::properties::toolkit_trust::{ToolkitKind, kind, read_toolkit};
-use crate::tree::{AtspiElement, ObservedRead, WalkedNode, get_live_actions};
+use crate::tree::{AtspiElement, ObservedRead, WalkedNode};
 
 const SCAN_NODES: usize = 600;
 const OWNER_NODES: usize = 64;
@@ -97,7 +97,13 @@ impl PopupWorld for SharedBus {
     ) -> Result<(Vec<String>, &'static [&'static str]), AdapterError> {
         let verbs = close_verbs(role, owner_toolkit(self, owner, deadline));
         let handle = owner.clone().into_native_handle();
-        let names = get_live_actions(self, &handle, deadline)?.unwrap_or_default();
+        let target = Target {
+            bus: self,
+            handle: &handle,
+            element: owner,
+            deadline,
+        };
+        let names = target.view()?.action_names().unwrap_or_default().to_vec();
         Ok((names, verbs))
     }
 

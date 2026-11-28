@@ -1,11 +1,11 @@
 use crate::{
     AdapterError, AdapterSession, AppInfo, CursorOverlayControl, Deadline, DeliverySemantics,
-    DismissAllNotificationsRequest, DismissNotificationRequest, ErrorCode, ImageBuffer,
-    InteractionLease, InteractionPolicy, KeyCombo, NotificationActionRequest, NotificationFilter,
-    NotificationInfo, OperationReport, PermissionReport, PermissionState, ProcessIdentity,
-    ProviderScriptOutput, ProviderScriptRequest, SessionAffinity, SignalBaseline, SignalFilter,
-    WindowInfo, WindowOp, actions::action_result::ActionResult, system::display_info::DisplayInfo,
-    system::screenshot_target::ScreenshotTarget,
+    DismissAllNotificationsRequest, DismissNotificationRequest, ErrorCode, FrontWindow,
+    ImageBuffer, InteractionLease, InteractionPolicy, KeyCombo, NotificationActionRequest,
+    NotificationFilter, NotificationInfo, OperationReport, PermissionReport, PermissionState,
+    ProcessIdentity, ProviderScriptOutput, ProviderScriptRequest, SessionAffinity, SignalBaseline,
+    SignalFilter, WindowInfo, WindowOp, actions::action_result::ActionResult,
+    system::display_info::DisplayInfo, system::screenshot_target::ScreenshotTarget,
 };
 
 pub trait SystemOps: Send + Sync {
@@ -282,6 +282,21 @@ pub trait SystemOps: Send + Sync {
         super::focused_window_key::press_key_in_focused_window(self, window, combo, policy, lease)
     }
 
+    /// Closes the open transient surface (a menu, a drop-down, a popup) of
+    /// `window`, or of the process's windows when there is no window, through
+    /// the platform's own close action, verified by reading it gone. `Ok(None)`
+    /// when none is open. Core calls it only after a plain Escape was refused
+    /// because the target did not hold the keyboard.
+    fn close_transient_surface(
+        &self,
+        _process: &ProcessIdentity,
+        _window: Option<&WindowInfo>,
+        _policy: InteractionPolicy,
+        _lease: &InteractionLease,
+    ) -> Result<Option<ActionResult>, AdapterError> {
+        Err(AdapterError::not_supported("close_transient_surface"))
+    }
+
     fn wait_for_menu(
         &self,
         _process: ProcessIdentity,
@@ -296,34 +311,24 @@ pub trait SystemOps: Send + Sync {
         Err(AdapterError::not_supported("read_front"))
     }
 
-    /// The executable name and start time of `pid`, which the front guard
-    /// reads to tell the command target's new windows from the user's.
     fn front_process(&self, _pid: u32) -> Option<crate::FrontProcess> {
         None
     }
 
-    /// The processes that descend from `root` and started at or after
-    /// `since_ms` (milliseconds since the Unix epoch) and are still running,
-    /// or `None` where the adapter cannot list them. The front guard uses it
-    /// to keep watching for a window a spawned helper has not yet shown.
     fn spawned_descendants(&self, _root: u32, _since_ms: u64) -> Option<Vec<u32>> {
         None
     }
 
     fn keep_below(
         &self,
-        _window: &crate::FrontWindow,
-        _above: &crate::FrontWindow,
+        _window: &FrontWindow,
+        _above: &FrontWindow,
         _lease: &InteractionLease,
     ) -> Result<(), AdapterError> {
         Err(AdapterError::not_supported("keep_below"))
     }
 
-    fn give_back(
-        &self,
-        _window: &crate::FrontWindow,
-        _lease: &InteractionLease,
-    ) -> Result<(), AdapterError> {
+    fn give_back(&self, _win: &FrontWindow, _lease: &InteractionLease) -> Result<(), AdapterError> {
         Err(AdapterError::not_supported("give_back"))
     }
 

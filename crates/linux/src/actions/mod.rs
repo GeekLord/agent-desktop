@@ -1,4 +1,5 @@
 pub(crate) mod action_call;
+mod adapter;
 pub(crate) mod chain;
 pub(crate) mod click;
 pub(crate) mod context;
@@ -6,6 +7,7 @@ pub(crate) mod disclosure;
 pub(crate) mod dispatch;
 pub(crate) mod focus;
 pub(crate) mod foreground;
+pub(crate) mod headed_focus;
 pub(crate) mod live;
 pub(crate) mod native_menu;
 pub(crate) mod physical_target;

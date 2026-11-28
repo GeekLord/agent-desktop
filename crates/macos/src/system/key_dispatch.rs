@@ -4,15 +4,11 @@ use agent_desktop_core::{
 };
 use std::time::Duration;
 
+use crate::system::escape_popup::{CANCEL, cancel_surface};
 use crate::tree::AXElement;
 
 #[path = "key_dispatch_menu.rs"]
 mod menu;
-
-#[path = "key_dispatch_window.rs"]
-mod window;
-
-pub(crate) use window::press_for_window;
 
 pub(crate) fn press_for_app_impl(
     process: ProcessIdentity,
@@ -118,25 +114,19 @@ fn semantic_step(label: &'static str) -> ActionStep {
         .with_verified(false)
 }
 
-/// The delivered result a completed step settles: verified only when the step
-/// read its own effect.
-fn delivery_result(step: ActionStep) -> ActionResult {
-    let verified = step.verified == Some(true);
-    let result = ActionResult::delivered_unverified("press_key").with_steps(vec![step]);
-    if verified {
-        result.with_verified_delivery()
-    } else {
-        result
-    }
-}
-
 fn post_delivery_process_result(
     process: &ProcessIdentity,
     step: ActionStep,
 ) -> Result<ActionResult, AdapterError> {
     crate::system::process::process_identity::require_core(process)
         .map_err(|error| error.with_disposition(DeliverySemantics::delivered_unverified()))?;
-    Ok(delivery_result(step))
+    let verified = step.verified == Some(true);
+    let result = ActionResult::delivered_unverified("press_key").with_steps(vec![step]);
+    Ok(if verified {
+        result.with_verified_delivery()
+    } else {
+        result
+    })
 }
 
 /// Where a key without modifiers lands as an accessibility action.
@@ -226,38 +216,15 @@ fn deliver_semantic_key(
     let Some(target) = semantic_key_target(identity, app, action, deadline)? else {
         return Ok(None);
     };
-    let (element, closes_surface) = match &target {
-        SemanticKeyTarget::FocusHolder(element) => (element, false),
-        SemanticKeyTarget::OpenSurface(element) => (element, true),
-    };
-    if closes_surface {
-        require_surface_owner(element, identity, deadline)?;
-    }
-    crate::tree::app_menu::require_generation(identity).map_err(not_delivered)?;
-    if !crate::actions::ax_helpers::try_ax_action_or_err(element, action, deadline)? {
-        return Ok(None);
-    }
-    let closed = closes_surface && surface_closed(element, deadline);
-    Ok(Some(semantic_step(action).with_verified(closed)))
-}
-
-/// Confirms an open surface still belongs to the process the key targets,
-/// before anything is sent to it.
-fn require_surface_owner(
-    surface: &AXElement,
-    identity: crate::system::process::process_identity::ProcessIdentity,
-    deadline: Deadline,
-) -> Result<(), AdapterError> {
-    match crate::tree::properties::ax_ipc::pid(surface, deadline) {
-        Ok(pid) if pid == identity.pid() => Ok(()),
-        Ok(_) => Err(AdapterError::stale_ref_because(
-            "Surface no longer belongs to the target process",
-        )),
-        Err(error) if error == accessibility_sys::kAXErrorInvalidUIElement => Err(
-            AdapterError::stale_ref_because("Surface became invalid before cancel"),
-        ),
-        Err(error) => Err(crate::tree::surface_read::map_error("AXPid", error)
-            .with_disposition(DeliverySemantics::not_delivered())),
+    match &target {
+        SemanticKeyTarget::FocusHolder(element) => {
+            crate::tree::app_menu::require_generation(identity).map_err(not_delivered)?;
+            if !crate::actions::ax_helpers::try_ax_action_or_err(element, action, deadline)? {
+                return Ok(None);
+            }
+            Ok(Some(semantic_step(action)))
+        }
+        SemanticKeyTarget::OpenSurface(element) => cancel_surface(identity, element, deadline),
     }
 }
 
@@ -265,33 +232,9 @@ fn not_delivered(error: AdapterError) -> AdapterError {
     error.with_disposition(DeliverySemantics::not_delivered())
 }
 
-/// A closed surface leaves the tree: a popover's element becomes invalid, and
-/// a menu's element stays readable but is no longer a child of its parent.
-fn surface_closed(surface: &AXElement, deadline: Deadline) -> bool {
-    let gone = || match crate::tree::surface_read::element(surface, "AXParent", deadline) {
-        Err(error) => error.code == ErrorCode::StaleRef,
-        Ok(None) => true,
-        Ok(Some(parent)) => crate::tree::surface_read::elements(&parent, "AXChildren", deadline)
-            .is_ok_and(|children| {
-                !children
-                    .iter()
-                    .any(|child| crate::tree::same_element(child, surface))
-            }),
-    };
-    deadline.poll_until(
-        SURFACE_CLOSE_WAIT,
-        Duration::from_millis(10),
-        gone,
-        |gone| *gone,
-    )
-}
-
 fn uses_menu_shortcut(combo: &KeyCombo, policy: InteractionPolicy) -> bool {
     policy.allow_focus_steal && !combo.modifiers.is_empty()
 }
-
-const CANCEL: &str = "AXCancel";
-const SURFACE_CLOSE_WAIT: Duration = Duration::from_millis(500);
 
 fn simple_key_action(combo: &KeyCombo) -> Option<&'static str> {
     if !combo.modifiers.is_empty() {
@@ -309,7 +252,11 @@ fn no_focused_element_error(policy: InteractionPolicy) -> AdapterError {
         ErrorCode::ActionFailed,
         "Application has no verified focused element for keyboard delivery",
     )
-    .with_details(serde_json::json!({ "physical_delivery_started": false }))
+    .with_details(serde_json::json!({
+        "check": "process_focus",
+        "physical_delivery_started": false,
+    }))
+    .with_disposition(DeliverySemantics::not_delivered())
     .with_suggestion(if policy.allow_focus_steal {
         "Ensure the target field has keyboard focus before retrying, or run the menu command without keys: find the item with 'snapshot --app <app> --surface menubar' and click its ref.".to_owned()
     } else {

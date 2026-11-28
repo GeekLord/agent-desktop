@@ -10,6 +10,7 @@ use crate::refs::{RefEntry, resolve_saved_ref::resolve_saved_ref};
 use crate::{AdapterError, AppError, actionability};
 use serde_json::json;
 
+pub(crate) mod post_release;
 pub(crate) mod presentation;
 pub(crate) mod ref_action_actionability;
 pub(crate) mod ref_action_context;
@@ -141,12 +142,8 @@ pub(crate) fn dispatch_resolved_landing(
     let presentation_action = request.action.clone();
     let ripples = presentation::effect_ripples(&final_target, &presentation_action);
     presentation::before_dispatch(&final_target, &preflight, &presentation_action, lease);
-    let (dispatch_result, front) = crate::actions::post_action::execute_verified_deferred(
-        final_target.adapter,
-        final_target.handle,
-        request,
-        lease,
-    );
+    let (dispatch_result, witness, front) =
+        post_release::dispatch_deferred(final_target.adapter, final_target.handle, request, lease);
     let mut preflight = preflight;
     if presentation::after_text_entry(&final_target, &presentation_action, &dispatch_result) {
         preflight.presentation_bounds = None;
@@ -169,8 +166,9 @@ pub(crate) fn dispatch_resolved_landing(
     Ok(ref_action_dispatched::DispatchedAction {
         result,
         handle,
-        after_release: ref_action_dispatched::AfterRelease {
+        after_release: post_release::PostRelease {
             surfaces_of: raises_surface.then_some(expected_process),
+            witness,
             front,
         },
     })
@@ -307,19 +305,21 @@ pub(crate) fn execute_resolved(
     let stability =
         actionability::StabilityExpectation::permissive(target.entry.geometry.bounds_hash);
     preflight_resolved(&target, &request, stability)?;
-    let resolved = resolve_saved_ref(target.adapter, target.entry, target.deadline, None)?;
-    let result = dispatch_resolved_landing(target.target, request, lease, Some(resolved)).map(
-        |mut dispatched| {
-            ref_action_dispatched::read_surfaces_after_release(
+    let resolved = Some(resolve_saved_ref(
+        target.adapter,
+        target.entry,
+        target.deadline,
+        None,
+    )?);
+    let result =
+        dispatch_resolved_landing(target.target, request, lease, resolved).map(|dispatched| {
+            dispatched.after_release.settle(
                 target.adapter,
-                std::mem::take(&mut dispatched.after_release),
                 &dispatched.handle,
                 target.deadline,
-                &mut dispatched.result,
-            );
-            dispatched.result
-        },
-    );
+                dispatched.result,
+            )
+        });
     finish_artifacts(target.target, &pre);
     result
 }

@@ -87,6 +87,16 @@ fn a_missing_focused_element_names_both_recovery_routes() {
 }
 
 #[test]
+fn a_missing_focused_element_is_a_refusal_core_can_route_to_a_surface_close() {
+    let error = super::no_focused_element_error(agent_desktop_core::InteractionPolicy::headless());
+
+    assert_eq!(error.disposition, DeliverySemantics::not_delivered());
+    let details = error.details.expect("refusal details");
+    assert_eq!(details["check"], "process_focus");
+    assert_eq!(details["physical_delivery_started"], false);
+}
+
+#[test]
 fn a_headed_missing_focused_element_does_not_suggest_enabling_headed() {
     let error = super::no_focused_element_error(agent_desktop_core::InteractionPolicy::headed());
     let hint = error.suggestion.expect("recovery suggestion");

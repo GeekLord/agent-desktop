@@ -2,8 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use agent_desktop_core::{
-    AdapterError, Deadline, DeliverySemantics, ErrorCode, KeyCombo, ProcessId, ProcessIdentity,
-    WindowInfo,
+    AdapterError, Deadline, DeliverySemantics, ErrorCode, ProcessId, ProcessIdentity, WindowInfo,
 };
 
 use super::world::PopupWorld;
@@ -52,13 +51,6 @@ fn process() -> ProcessIdentity {
 
 fn deadline() -> Deadline {
     Deadline::standard().expect("deadline")
-}
-
-fn escape() -> KeyCombo {
-    KeyCombo {
-        key: "escape".to_owned(),
-        modifiers: Vec::new(),
-    }
 }
 
 fn window(instance: Option<&str>) -> WindowInfo {
@@ -211,8 +203,7 @@ fn a_process_that_changed_before_discovery_fails_closed() {
     ] {
         let world = World::matched();
         *world.live.borrow_mut() = VecDeque::from([live]);
-        let error =
-            close_popup_with(&world, &process(), None, &escape(), deadline()).expect_err("refused");
+        let error = close_popup_with(&world, &process(), None, deadline()).expect_err("refused");
         assert_eq!(error.disposition, DeliverySemantics::not_delivered());
         assert_eq!(world.count("windows"), 0);
         assert_eq!(world.count("owner"), 0);
@@ -224,8 +215,7 @@ fn a_process_that_changed_before_discovery_fails_closed() {
 fn a_failed_discovery_is_not_a_delivery() {
     let mut world = World::matched();
     world.windows = Err(AdapterError::new(ErrorCode::ActionFailed, "unreadable"));
-    let error =
-        close_popup_with(&world, &process(), None, &escape(), deadline()).expect_err("refused");
+    let error = close_popup_with(&world, &process(), None, deadline()).expect_err("refused");
     assert_eq!(error.disposition, DeliverySemantics::not_delivered());
     assert_eq!(world.count("walk"), 0);
     assert_eq!(world.count("dismiss"), 0);
@@ -236,8 +226,8 @@ fn a_window_of_another_generation_fails_closed_before_discovery() {
     for instance in [None, Some("recycled")] {
         let world = World::matched();
         let target = window(instance);
-        let error = close_popup_with(&world, &process(), Some(&target), &escape(), deadline())
-            .expect_err("refused");
+        let error =
+            close_popup_with(&world, &process(), Some(&target), deadline()).expect_err("refused");
         assert_eq!(error.disposition, DeliverySemantics::not_delivered());
         assert_eq!(world.count("windows"), 0);
         assert_eq!(world.count("walk"), 0);
@@ -252,8 +242,7 @@ fn a_process_that_changed_after_discovery_fails_closed() {
         Lookup::Found(facts(INSTANCE)),
         Lookup::Found(facts("boot:other")),
     ]);
-    let error =
-        close_popup_with(&world, &process(), None, &escape(), deadline()).expect_err("refused");
+    let error = close_popup_with(&world, &process(), None, deadline()).expect_err("refused");
     assert_eq!(error.disposition, DeliverySemantics::not_delivered());
     assert_eq!(world.count("windows"), 1);
     assert_eq!(world.count("walk"), 0);
@@ -264,8 +253,7 @@ fn a_process_that_changed_after_discovery_fails_closed() {
 fn a_foreign_bus_owner_before_the_action_fails_closed() {
     let world = World::matched();
     *world.owner_checks.borrow_mut() = VecDeque::from([Ok(()), Ok(()), Err(refusal())]);
-    let error =
-        close_popup_with(&world, &process(), None, &escape(), deadline()).expect_err("refused");
+    let error = close_popup_with(&world, &process(), None, deadline()).expect_err("refused");
     assert_eq!(error.disposition, DeliverySemantics::not_delivered());
     assert_eq!(world.count("owner"), 3);
     assert_eq!(world.count("dismiss"), 0);
@@ -274,7 +262,7 @@ fn a_foreign_bus_owner_before_the_action_fails_closed() {
 #[test]
 fn matching_identity_and_bus_ownership_reach_the_action() {
     let world = World::matched();
-    let settled = close_popup_with(&world, &process(), None, &escape(), deadline())
+    let settled = close_popup_with(&world, &process(), None, deadline())
         .expect("closed")
         .expect("a popup answered");
     assert_eq!(settled.action, "press");

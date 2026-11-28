@@ -254,16 +254,14 @@ impl SystemOps for MacOSAdapter {
         crate::system::key_dispatch::press_for_app_impl(process, combo, policy, lease.deadline())
     }
 
-    /// Core's focus-gated delivery to the named window, then the close of the
-    /// menu or popover a refused Escape would close.
-    fn press_key_for_window(
+    fn close_transient_surface(
         &self,
-        window: &WindowInfo,
-        combo: &agent_desktop_core::KeyCombo,
+        process: &ProcessIdentity,
+        window: Option<&WindowInfo>,
         policy: agent_desktop_core::InteractionPolicy,
         lease: &InteractionLease,
-    ) -> Result<ActionResult, AdapterError> {
-        crate::system::key_dispatch::press_for_window(self, window, combo, policy, lease)
+    ) -> Result<Option<ActionResult>, AdapterError> {
+        crate::system::escape_popup::close_transient_surface(process, window, policy, lease)
     }
 
     fn wait_for_menu(

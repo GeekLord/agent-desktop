@@ -35,41 +35,24 @@ pub(crate) fn transient_surface_for_process(
     })
 }
 
-/// The menu or popover that belongs to `window`, read in one bounded pass: a
-/// surface inside that window first, then the application's own surfaces, so a
-/// surface in a window that is not focused is still found.
+/// The menu or popover inside `window`, searched at any depth because a popover
+/// hangs below the control that raised it. The window is resolved inside the
+/// observed pass, so a window that is gone and a process that was replaced both
+/// fail instead of reading as an absent surface.
 #[cfg(target_os = "macos")]
-pub(crate) fn transient_surface_for_window(
+pub(crate) fn transient_surface_in_window(
     identity: ProcessIdentity,
     window: &WindowInfo,
     deadline: Deadline,
 ) -> Result<Option<AXElement>, AdapterError> {
     super::app_menu::observe(identity, deadline, || {
-        if let Some(surface) = surface_inside_window(window, deadline)? {
-            return Ok(Some(surface));
-        }
-        super::app_menu::require_generation(identity)?;
-        super::app_menu::open_transient_surface(identity.pid(), deadline)
+        let owner =
+            crate::system::window::window_resolve::window_element_for_info(window, deadline)?;
+        Ok(
+            super::app_menu::find_transient_surface(owner, "window".into(), deadline)?
+                .map(|(_, surface)| surface),
+        )
     })
-}
-
-/// The menu or popover inside `window`, searched at any depth because a
-/// popover hangs below the control that raised it.
-#[cfg(target_os = "macos")]
-fn surface_inside_window(
-    window: &WindowInfo,
-    deadline: Deadline,
-) -> Result<Option<AXElement>, AdapterError> {
-    let owner = crate::system::window::window_resolve::window_element_for_info_with_deadline(
-        window, deadline,
-    )?;
-    Ok(super::app_menu::find_menu_descendant(
-        owner,
-        "window".into(),
-        super::app_menu::Transient::MenuOrPopover,
-        deadline,
-    )?
-    .map(|(_, surface)| surface))
 }
 
 #[cfg(target_os = "macos")]

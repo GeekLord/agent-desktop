@@ -20,13 +20,11 @@ pub(crate) fn execute_with_auto_wait(
 ) -> Result<ActionResult, AdapterError> {
     let landing = execute_with_auto_wait_and_lease(context, request)?;
     drop(landing.lease);
-    let mut result = landing.result;
-    crate::ref_action::ref_action_dispatched::read_surfaces_after_release(
+    let result = landing.after_release.settle(
         context.adapter,
-        landing.after_release,
         &landing.handle,
         landing.deadline,
-        &mut result,
+        landing.result,
     );
     crate::ref_action::finish_artifacts(
         RefActionContext::new(context, landing.deadline),

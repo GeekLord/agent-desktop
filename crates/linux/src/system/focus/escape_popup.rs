@@ -1,26 +1,20 @@
-//! Escape for an application that does not own the active window.
+//! The open popup of a window that does not own the active window.
 //!
-//! The key route sends the key only to the active window, so a key for a
-//! background application is refused. A native popup that the application
-//! opened stays open in the background on some toolkits, and the key cannot
-//! reach it. Web documents are excluded, and a candidate must show an open
-//! popup menu child and advertise a dismissal verb (or GTK 3 combo box `Press`,
-//! L4-4) so Escape never activates a button's primary handler.
-//!
-//! Three states, in this order: the key route is allowed and nothing here
-//! runs; the key route is refused for focus and a dismissible native popup
-//! owner exists in the target window; otherwise the refusal stays as it was.
-//! The owner's reply is the answer, so a rejected action delivers nothing and
-//! an owner that does not answer leaves the delivery uncertain; the key
-//! route's refusal replaces neither. Every stage re-checks that the element
-//! still belongs to the original process instance, so a recycled process id
-//! never receives the dismissal.
+//! The key route sends Escape only to the active window, and core asks the
+//! adapter to close the open transient surface when that key was refused for
+//! focus. Web documents are excluded, and a candidate must show an open popup
+//! menu child and advertise a dismissal verb (or GTK 3 combo box `Press`,
+//! L4-4) so Escape never activates a button's primary handler. The owner's
+//! reply is the answer, so a rejected action delivers nothing and an owner
+//! that does not answer leaves the delivery uncertain. Every stage re-checks
+//! that the element still belongs to the original process instance, so a
+//! recycled process id never receives the dismissal.
 
 use std::time::Duration;
 
 use agent_desktop_core::{
     Action, ActionResult, AdapterError, ChainRung, Deadline, DeliveryOutcome, DeliverySemantics,
-    KeyCombo, ProcessIdentity, StepMechanism, WindowInfo,
+    InteractionLease, InteractionPolicy, KeyCombo, ProcessIdentity, StepMechanism, WindowInfo,
 };
 
 use crate::actions::action_call::resolve_verb;
@@ -46,24 +40,17 @@ use world::PopupWorld;
 
 const CLOSE_SETTLE: Duration = Duration::from_millis(1000);
 const CLOSE_STEP: Duration = Duration::from_millis(50);
-const FOCUS_CHECKS: [&str; 2] = ["window_active", "exact_window_focus"];
 const SUGGESTION: &str = "Refresh the snapshot and check whether the popup is still open.";
 const CLOSE_LABEL: &str = "Action.DoAction";
+const ESCAPE_KEY: &str = "escape";
 const DISMISS_VERBS: [&str; 3] = ["collapse", "cancel", "close"];
 const GTK3_COMBO_DISMISS_VERBS: [&str; 4] = ["collapse", "cancel", "close", "press"];
 
-pub(super) fn is_plain_escape(combo: &KeyCombo) -> bool {
-    combo.modifiers.is_empty()
-        && (combo.key.eq_ignore_ascii_case("escape") || combo.key.eq_ignore_ascii_case("esc"))
-}
-
-pub(super) fn is_focus_refusal(error: &AdapterError) -> bool {
-    error
-        .details
-        .as_ref()
-        .and_then(|details| details.get("check"))
-        .and_then(|check| check.as_str())
-        .is_some_and(|check| FOCUS_CHECKS.contains(&check))
+fn escape_action() -> Action {
+    Action::PressKey(KeyCombo {
+        key: ESCAPE_KEY.to_owned(),
+        modifiers: Vec::new(),
+    })
 }
 
 fn bits(node: &WalkedNode<ObservedRead>) -> Option<StateBits<'_>> {
@@ -244,39 +231,24 @@ fn popup_outcome(reply: WriteReply, read_closed: impl FnOnce() -> Option<bool>) 
     }
 }
 
-/// The answer for a refused Escape: the popup attempt's own result, or its own
-/// error, which already says whether that attempt may have landed. The refusal
-/// stands only when the target window shows no dismissible open popup owner.
-pub(super) fn popup_answer(
-    refusal: AdapterError,
-    popup: Result<Option<ActionResult>, AdapterError>,
-) -> Result<ActionResult, AdapterError> {
-    match popup {
-        Ok(Some(settled)) => Ok(settled),
-        Ok(None) => Err(refusal),
-        Err(attempt) => Err(attempt),
-    }
-}
-
-/// The refused Escape of a background application, answered by closing the
-/// open native popup its target window shows when the owner advertises a safe
-/// dismissal verb. `Ok(None)` leaves the refusal as it was; every other
-/// result, the popup attempt's own failure included, is the answer.
-pub(super) fn close_open_popup(
+/// The open native popup of the target window, closed through its owner when
+/// it advertises a safe dismissal verb. `None` when no dismissible popup is
+/// open, which leaves core's refusal as it was; every other result, the
+/// attempt's own failure included, is the answer.
+pub(crate) fn close_transient_surface(
     bus: &SharedBus,
     process: &ProcessIdentity,
     window: Option<&WindowInfo>,
-    combo: &KeyCombo,
-    deadline: Deadline,
+    _policy: InteractionPolicy,
+    lease: &InteractionLease,
 ) -> Result<Option<ActionResult>, AdapterError> {
-    close_popup_with(bus, process, window, combo, deadline)
+    close_popup_with(bus, process, window, lease.deadline())
 }
 
 fn close_popup_with(
     world: &impl PopupWorld,
     process: &ProcessIdentity,
     window: Option<&WindowInfo>,
-    combo: &KeyCombo,
     deadline: Deadline,
 ) -> Result<Option<ActionResult>, AdapterError> {
     verify_live_process(process, &world.live(process.pid.get()))?;
@@ -329,13 +301,7 @@ fn close_popup_with(
         mechanism: StepMechanism::SemanticApi,
         run: Box::new(run),
     }];
-    run_semantic_chain(
-        &Action::PressKey(combo.clone()),
-        &mut rungs,
-        deadline,
-        SUGGESTION,
-    )
-    .map(Some)
+    run_semantic_chain(&escape_action(), &mut rungs, deadline, SUGGESTION).map(Some)
 }
 
 #[cfg(test)]
