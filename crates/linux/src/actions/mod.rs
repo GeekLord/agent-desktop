@@ -10,7 +10,7 @@ pub(crate) mod live;
 pub(crate) mod native_menu;
 pub(crate) mod physical_target;
 mod popup_verify;
-mod process_check;
+pub(crate) mod process_check;
 pub(crate) mod scroll;
 pub(crate) mod select;
 pub(crate) mod toggle_state;

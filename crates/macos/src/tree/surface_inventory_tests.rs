@@ -86,6 +86,26 @@ fn only_a_control_with_few_children_is_read_for_an_anchored_surface() {
 }
 
 #[test]
+fn a_failed_inventory_does_not_hide_the_surface_below_the_target() {
+    let failed = || Err(agent_desktop_core::AdapterError::timeout("inventory"));
+
+    let kept =
+        super::with_anchored(failed(), vec![surface("target/children/0", "popover")]).unwrap();
+    assert_eq!(kept.len(), 1);
+    assert!(super::with_anchored(failed(), Vec::new()).is_err());
+
+    let both = super::with_anchored(
+        Ok(vec![surface("menu", "menu")]),
+        vec![surface("target", "popover")],
+    )
+    .unwrap();
+    assert_eq!(
+        both.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        ["menu", "target"]
+    );
+}
+
+#[test]
 fn a_dialog_style_window_is_an_alert_only_when_it_is_modal_and_on_screen() {
     assert_eq!(
         classify_surface(Some("AXWindow"), Some("AXDialog"), Some(true), Some(false)),

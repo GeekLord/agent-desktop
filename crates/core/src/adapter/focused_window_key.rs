@@ -1,15 +1,13 @@
-use crate::adapter::SystemOps;
+//! Key delivery to a named window, gated on that window holding the focus.
+
 use crate::{
     ActionResult, AdapterError, ErrorCode, InteractionLease, InteractionPolicy, KeyCombo,
-    ProcessIdentity, WindowInfo,
+    ProcessIdentity, WindowInfo, adapter::SystemOps,
 };
 
 /// The refusal for a key press whose named window could not be confirmed as
 /// the focused one, with nothing sent.
-pub(super) fn exact_focus_unconfirmed(
-    window: &WindowInfo,
-    policy: InteractionPolicy,
-) -> AdapterError {
+fn exact_focus_unconfirmed(window: &WindowInfo, policy: InteractionPolicy) -> AdapterError {
     AdapterError::new(
         ErrorCode::ActionFailed,
         "The named window does not hold keyboard focus; no key was sent",
@@ -26,9 +24,11 @@ pub(super) fn exact_focus_unconfirmed(
     .with_disposition(crate::DeliverySemantics::not_delivered())
 }
 
-/// Delivers `combo` to the process of `window` only after the window reads
-/// back as the focused one with the stored process instance.
-pub(super) fn press_in_exact_window<A: SystemOps + ?Sized>(
+/// Sends `combo` to the process of `window` only when `window` is the exact
+/// focused window, and refuses before anything is sent otherwise. This is the
+/// default of `SystemOps::press_key_for_window`; an adapter that overrides
+/// that method to add a route after the refusal calls it first.
+pub fn press_key_in_focused_window<A: SystemOps + ?Sized>(
     adapter: &A,
     window: &WindowInfo,
     combo: &KeyCombo,

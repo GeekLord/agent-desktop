@@ -1,8 +1,7 @@
 use super::{AXElement, properties::element::element_for_pid, surface_read};
-use agent_desktop_core::{AdapterError, Deadline, ErrorCode, SnapshotSurface};
+use agent_desktop_core::{AdapterError, Deadline, ErrorCode, SnapshotSurface, WindowInfo};
 
-#[cfg(target_os = "macos")]
-const POPOVER_SEARCH_LIMIT: usize = 4_096;
+use crate::system::process::process_identity::ProcessIdentity;
 
 #[cfg(target_os = "macos")]
 pub(crate) fn focused_surface_for_pid(
@@ -23,6 +22,54 @@ pub(crate) fn menu_element_for_pid(
     super::app_menu::observe(identity, deadline, || {
         super::app_menu::root_for_pid(pid, SnapshotSurface::Menu, deadline)
     })
+}
+
+/// The menu or popover the application shows, read in one bounded pass.
+#[cfg(target_os = "macos")]
+pub(crate) fn transient_surface_for_process(
+    identity: ProcessIdentity,
+    deadline: Deadline,
+) -> Result<Option<AXElement>, AdapterError> {
+    super::app_menu::observe(identity, deadline, || {
+        super::app_menu::open_transient_surface(identity.pid(), deadline)
+    })
+}
+
+/// The menu or popover that belongs to `window`, read in one bounded pass: a
+/// surface inside that window first, then the application's own surfaces, so a
+/// surface in a window that is not focused is still found.
+#[cfg(target_os = "macos")]
+pub(crate) fn transient_surface_for_window(
+    identity: ProcessIdentity,
+    window: &WindowInfo,
+    deadline: Deadline,
+) -> Result<Option<AXElement>, AdapterError> {
+    super::app_menu::observe(identity, deadline, || {
+        if let Some(surface) = surface_inside_window(window, deadline)? {
+            return Ok(Some(surface));
+        }
+        super::app_menu::require_generation(identity)?;
+        super::app_menu::open_transient_surface(identity.pid(), deadline)
+    })
+}
+
+/// The menu or popover inside `window`, searched at any depth because a
+/// popover hangs below the control that raised it.
+#[cfg(target_os = "macos")]
+fn surface_inside_window(
+    window: &WindowInfo,
+    deadline: Deadline,
+) -> Result<Option<AXElement>, AdapterError> {
+    let owner = crate::system::window::window_resolve::window_element_for_info_with_deadline(
+        window, deadline,
+    )?;
+    Ok(super::app_menu::find_menu_descendant(
+        owner,
+        "window".into(),
+        super::app_menu::Transient::MenuOrPopover,
+        deadline,
+    )?
+    .map(|(_, surface)| surface))
 }
 
 #[cfg(target_os = "macos")]
@@ -60,38 +107,53 @@ pub(crate) fn surface_in_window(
     }
 }
 
-/// The first popover in `window`, nearest the window first. None only when
-/// every element was read: a search cut at `POPOVER_SEARCH_LIMIT` elements
-/// fails as not found and says it is incomplete.
+/// The first popover in `window`, nearest the window first, through a search
+/// that opens every element below it, so a popover anchored to a control inside
+/// a list or a table row is reached. None only when the search read every
+/// element: one cut at its element limit fails as not found and says it is
+/// incomplete.
 #[cfg(target_os = "macos")]
 fn popover_in_window(
     window: &AXElement,
     deadline: Deadline,
 ) -> Result<Option<AXElement>, AdapterError> {
-    let mut level = vec![window.clone()];
-    let mut searched = 0;
-    while !level.is_empty() {
-        let mut below = Vec::new();
-        for element in level {
-            if role_or_subrole_matches(&element, "AXPopover", deadline)? {
-                return Ok(Some(element));
+    let found = super::app_menu::find_surface_descendant_with(
+        window.clone(),
+        "window".into(),
+        super::app_menu::ChildExpansion::EveryNode,
+        deadline,
+        |element, _| {
+            if role_or_subrole_matches(element, "AXPopover", deadline)? {
+                return Ok((true, Vec::new()));
             }
-            searched += 1;
-            if searched >= POPOVER_SEARCH_LIMIT {
-                return Err(AdapterError::new(
-                    ErrorCode::ElementNotFound,
-                    format!("No popover among the first {searched} elements of the window; the rest was not searched"),
-                )
-                .with_details(serde_json::json!({
-                    "kind": "popover_search_limit",
-                    "complete": false,
-                })));
-            }
-            below.extend(surface_read::elements(&element, "AXChildren", deadline)?);
-        }
-        level = below;
+            Ok((
+                false,
+                surface_read::elements(element, "AXChildren", deadline)?,
+            ))
+        },
+    )
+    .map_err(popover_search_error)?;
+    Ok(found.map(|(_, popover)| popover))
+}
+
+fn popover_search_error(error: AdapterError) -> AdapterError {
+    if !super::app_menu::is_surface_search_limit(&error) {
+        return error;
     }
-    Ok(None)
+    popover_search_cut()
+}
+
+/// A popover search that did not read every element: it reached its element
+/// limit first, and a popover may sit below that cut.
+fn popover_search_cut() -> AdapterError {
+    AdapterError::new(
+        ErrorCode::ElementNotFound,
+        "No popover among the elements the search read; the search reached its element limit first",
+    )
+    .with_details(serde_json::json!({
+        "kind": "popover_search_limit",
+        "complete": false,
+    }))
 }
 
 #[cfg(target_os = "macos")]

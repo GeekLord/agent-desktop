@@ -269,8 +269,9 @@ pub trait SystemOps: Send + Sync {
         Err(AdapterError::not_supported("press_key_for_app"))
     }
 
-    /// Checks the exact focused window before process-scoped key delivery;
-    /// adapters can override it to keep the window identity through their gates.
+    /// Checks the exact focused window before process-scoped key delivery
+    /// (`press_key_in_focused_window`). Adapters can override this to retain
+    /// the window identity through their native delivery gates.
     fn press_key_for_window(
         &self,
         window: &WindowInfo,
@@ -278,7 +279,7 @@ pub trait SystemOps: Send + Sync {
         policy: InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<ActionResult, AdapterError> {
-        super::window_key_refusal::press_in_exact_window(self, window, combo, policy, lease)
+        super::focused_window_key::press_key_in_focused_window(self, window, combo, policy, lease)
     }
 
     fn wait_for_menu(
