@@ -1,4 +1,4 @@
-//! Bounded SelectionItem descendant search (A19-7).
+//! Bounded SelectionItem descendant search and its realize scroll steps (A19-7).
 
 use agent_desktop_core::{AdapterError, Deadline, ErrorCode};
 
@@ -25,12 +25,32 @@ pub(crate) fn accept_selection_match(already_found: bool) -> Result<(), AdapterE
     }
 }
 
+/// Admits one live match into `found`, the match this scan observed. A match
+/// that is not the element an earlier scan matched (`prior`), or not the one
+/// this scan already holds, is a second item: `AMBIGUOUS_TARGET`. `prior` is
+/// only compared against, so an element kept from before a scroll is never
+/// the answer of a scan that did not see it.
+pub(crate) fn admit_selection_match<T: Clone>(
+    prior: Option<&T>,
+    found: &mut Option<T>,
+    candidate: &T,
+    same: impl Fn(&T, &T) -> bool,
+) -> Result<(), AdapterError> {
+    let differs = |known: &T| !same(known, candidate);
+    accept_selection_match(prior.is_some_and(differs) || found.as_ref().is_some_and(differs))?;
+    found.get_or_insert_with(|| candidate.clone());
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
 mod imp {
     use super::{
         AdapterError, Deadline, ErrorCode, MAX_SELECT_DEPTH, MAX_SELECT_NODES, UIAElement,
-        accept_selection_match, select_node_budget_has_room,
+        admit_selection_match, select_node_budget_has_room,
     };
+    use crate::actions::mutation::{classify_success, classify_write};
+    use crate::actions::scroll::SCROLL_LABEL;
+    use crate::actions::select_locate::RealizeScrollStep;
     use crate::tree::automation::automation_client;
     use crate::tree::automation::uia_failure_error;
     use crate::tree::name_evidence::{name_fields, read_label};
@@ -40,11 +60,15 @@ mod imp {
     use crate::tree::walk::walker::TreeSource;
     use crate::tree::walk::walker_source::{UiaTreeSource, same_element};
     use agent_desktop_core::LocatorField;
+    use uiautomation::patterns::UIScrollPattern;
+    use uiautomation::types::ScrollAmount;
+    use windows::Win32::UI::Accessibility::UIA_ScrollPatternNoScroll;
 
     pub(crate) fn find_named_selection_item(
         root: &UIAElement,
         value: &str,
         deadline: Deadline,
+        prior: Option<&UIAElement>,
     ) -> Result<Option<UIAElement>, AdapterError> {
         let client = automation_client()?;
         let source = UiaTreeSource::for_root(root)?;
@@ -52,7 +76,7 @@ mod imp {
         let mut stack = Vec::new();
         push_children(&source, (&prepared, 1), deadline, 0, &mut stack)?;
         let mut visited = 0_usize;
-        let mut found: Option<UIAElement> = None;
+        let mut found = None;
         while let Some((candidate, depth)) = stack.pop() {
             deadline.ensure_remaining()?;
             visited = visited.saturating_add(1);
@@ -60,13 +84,9 @@ mod imp {
                 return Err(node_budget_error());
             }
             if selection_item_available(&candidate) && name_matches(&candidate, value) {
-                match &found {
-                    None => found = Some(candidate.clone()),
-                    Some(prev) if same_element(&client, prev, &candidate) => {}
-                    Some(_) => {
-                        accept_selection_match(true)?;
-                    }
-                }
+                admit_selection_match(prior, &mut found, &candidate, |left, right| {
+                    same_element(&client, left, right)
+                })?;
             }
             if depth < MAX_SELECT_DEPTH {
                 push_children(
@@ -79,6 +99,41 @@ mod imp {
             }
         }
         Ok(found)
+    }
+
+    /// Scrolls the container one small step down and reports whether its position stopped changing.
+    pub(crate) fn realize_scroll_step(
+        pattern: &UIScrollPattern,
+        deadline: Deadline,
+    ) -> Result<RealizeScrollStep, AdapterError> {
+        deadline.ensure_remaining()?;
+        let before = pattern.get_vertical_scroll_percent().ok();
+        match pattern.scroll(ScrollAmount::NoAmount, ScrollAmount::SmallIncrement) {
+            Ok(()) => {
+                let _ = classify_success()?;
+            }
+            Err(error) => {
+                let _ = classify_write("Scroll", SCROLL_LABEL, &error)?;
+                return Ok(RealizeScrollStep::Stop);
+            }
+        }
+        let after = pattern.get_vertical_scroll_percent().ok();
+        Ok(RealizeScrollStep::Window {
+            end_of_range: before.is_some() && before == after,
+        })
+    }
+
+    /// Scrolls the container back to a vertical position it reported earlier; `false` when it cannot.
+    pub(crate) fn scroll_to_position(
+        pattern: &UIScrollPattern,
+        position: f64,
+        deadline: Deadline,
+    ) -> Result<bool, AdapterError> {
+        deadline.ensure_remaining()?;
+        match pattern.set_scroll_percent(UIA_ScrollPatternNoScroll, position) {
+            Ok(()) => classify_success(),
+            Err(error) => classify_write("Scroll", SCROLL_LABEL, &error),
+        }
     }
 
     pub(crate) fn selection_item_available(element: &UIAElement) -> bool {
@@ -167,6 +222,7 @@ mod imp {
         _root: &UIAElement,
         _value: &str,
         _deadline: Deadline,
+        _prior: Option<&UIAElement>,
     ) -> Result<Option<UIAElement>, AdapterError> {
         Ok(None)
     }
@@ -181,6 +237,9 @@ mod imp {
 }
 
 pub(crate) use imp::{find_named_selection_item, name_matches, selection_item_available};
+
+#[cfg(target_os = "windows")]
+pub(crate) use imp::{realize_scroll_step, scroll_to_position};
 
 #[cfg(test)]
 mod tests {
@@ -220,3 +279,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "select_search_match_tests.rs"]
+mod match_tests;
