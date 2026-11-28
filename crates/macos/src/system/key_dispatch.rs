@@ -99,9 +99,10 @@ fn background_chord_refusal(combo: &KeyCombo, frontmost: bool) -> Option<Adapter
             "cause": "background_chord",
             "physical_delivery_started": false,
         }))
-        .with_suggestion(
-            "Bring the application to the front yourself, or use the menu item through a semantic route. Use --headed only if the user asked for focus changes.",
-        )
+        .with_suggestion(format!(
+            "Bring the application to the front yourself, or use the menu item through a semantic route. {}",
+            agent_desktop_core::headed_mode_suggestion("brings the application to the foreground before sending keys")
+        ))
         .with_disposition(DeliverySemantics::not_delivered()),
     )
 }
@@ -157,10 +158,12 @@ fn no_focused_element_error(policy: InteractionPolicy) -> AdapterError {
     )
     .with_details(serde_json::json!({ "physical_delivery_started": false }))
     .with_suggestion(if policy.allow_focus_steal {
-        "Ensure the target field has keyboard focus before retrying, or run the menu command without keys: find the item with 'snapshot --app <app> --surface menubar' and click its ref."
+        "Ensure the target field has keyboard focus before retrying, or run the menu command without keys: find the item with 'snapshot --app <app> --surface menubar' and click its ref.".to_owned()
     } else {
-        "Retry with --headed so the app can take focus, or run the menu command without \
-         keys: find the item with 'snapshot --app <app> --surface menubar' and click its ref."
+        format!(
+            "{} A headless alternative is to run the menu command without keys: find the item with 'snapshot --app <app> --surface menubar' and click its ref.",
+            agent_desktop_core::headed_mode_suggestion("lets the app take focus before sending keys")
+        )
     })
 }
 

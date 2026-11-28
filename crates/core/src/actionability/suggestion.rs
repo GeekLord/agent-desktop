@@ -1,9 +1,8 @@
-use std::borrow::Cow;
-
 use super::evidence::ActionabilityEvidence;
 use super::report::ActionabilityReport;
 use crate::actions::{action_request::ActionRequest, capability};
 use crate::{Action, ErrorCode, adapter::PlatformAdapter};
+use std::borrow::Cow;
 
 /// The text every unmatched actionability failure falls back to.
 pub(super) const WAITING_SUGGESTION: &str = "Waiting will not help: this element cannot satisfy the action as targeted. Target an element that advertises the action (check available_actions in a fresh snapshot). For a dropdown without select support, open it with click, inspect its choices, and use explicit keyboard input.";
@@ -11,9 +10,22 @@ pub(super) const WAITING_SUGGESTION: &str = "Waiting will not help: this element
 /// The generic recovery text for a report that ends `ACTION_FAILED`.
 pub(super) const ACTION_FAILED_SUGGESTION: &str = "Wait for the target to become actionable, refresh the snapshot, or use an explicit physical/focus command if intended.";
 
-const OFFSCREEN_SUGGESTION: &str = "The target is off screen. Run 'scroll-to' on its ref first (some lists can be scrolled only with --headed), take a fresh snapshot, then retry the action.";
+const OFFSCREEN_SUGGESTION: &str = "The target is off screen. Run 'scroll-to' on its ref first, take a fresh snapshot, then retry the action.";
 
 const ITEM_CLICK_PREFIX: &str = "To choose one item, click the item itself: find it by name in a fresh snapshot and click its ref.";
+
+pub(super) fn text_write(policy: crate::InteractionPolicy) -> String {
+    if policy.is_headed() {
+        "This field has no semantic text-write action. Use 'type' in the current headed mode for physical keyboard input; select the existing text first if you intend to replace it. If typing refuses because the field cannot be focused, use clipboard-set and the app's paste shortcut, then verify the field.".to_owned()
+    } else {
+        format!(
+            "This field has no semantic text-write action. {} For 'type', select the existing text first if you intend to replace it.",
+            crate::headed_mode_suggestion(
+                "sends synthetic keys to the field and may take the foreground"
+            )
+        )
+    }
+}
 
 const CELL_SUGGESTION: &str = "This cell is not directly editable. Activate it, take a fresh snapshot, and target the text editor if one appears.";
 
@@ -25,11 +37,7 @@ const SELECT_FOR_POINTER_SUGGESTION: &str = "This element advertises Select but 
 
 const NO_POINTER_SESSION_SUGGESTION: &str = "This element has no semantic path for the action, and this session cannot send physical pointer input, so headed mode cannot help. Use an action the element advertises (see available_actions in a fresh snapshot), or report the limitation to the user.";
 
-const POLICY_SUGGESTION: &str = "This element has no semantic path for the action, and headless mode does not allow the physical input it needs. Use an action the element advertises (see available_actions in a fresh snapshot). Use --headed only if the user asked for physical input; otherwise report the limitation to the user.";
-
-const TEXT_WRITE_HEADED: &str = "This field has no semantic text-write action. Use 'type' in the current headed mode for physical keyboard input; select the existing text first if you intend to replace it. If typing refuses because the field cannot be focused, use clipboard-set and the app's paste shortcut, then verify the field.";
-
-const TEXT_WRITE_HEADLESS: &str = "This field has no semantic text-write action. Use '--headed type' for physical keyboard input; select the existing text first if you intend to replace it. If typing refuses because the field cannot be focused, use clipboard-set and the app's paste shortcut, then verify the field.";
+const POLICY_SUGGESTION: &str = "This element has no semantic path for the action, and headless mode does not allow the physical input it needs. Use an action the element advertises (see available_actions in a fresh snapshot). Use --headed only if the user explicitly asked for physical input; otherwise report the limitation to the user.";
 
 /// Picks the step that can fix this refusal. Each branch names a step the
 /// target and the session can take; a refusal no branch recognises falls to
@@ -47,20 +55,17 @@ pub(super) fn select(
         check.check == "editable" && check.status == super::status::ActionabilityStatus::Fail
     });
     let text_field = matches!(role, "textfield" | "combobox");
+    if *code == ErrorCode::ActionNotSupported
+        && text_field
+        && matches!(request.action, Action::SetValue(_) | Action::Clear)
+    {
+        return Cow::Owned(text_write(request.policy));
+    }
     Cow::Borrowed(match code {
         ErrorCode::ActionFailed => ACTION_FAILED_SUGGESTION,
         _ if role == "cell" && editable_failed => CELL_SUGGESTION,
         ErrorCode::ActionNotSupported if matches!(request.action, Action::SetFocus) => {
             SET_FOCUS_SUGGESTION
-        }
-        ErrorCode::ActionNotSupported
-            if text_field && matches!(request.action, Action::SetValue(_) | Action::Clear) =>
-        {
-            if request.policy.is_headed() {
-                TEXT_WRITE_HEADED
-            } else {
-                TEXT_WRITE_HEADLESS
-            }
         }
         ErrorCode::PolicyDenied
             if matches!(request.action, Action::TypeText(_))
@@ -96,19 +101,22 @@ pub(super) fn refine(
     report: &ActionabilityReport,
     evidence: &ActionabilityEvidence,
     request: &ActionRequest,
-) -> Cow<'static, str> {
+) -> String {
     if suggestion == ACTION_FAILED_SUGGESTION
         && evidence.state.offscreen == Some(true)
         && report.only_blocking_check_is_offscreen()
     {
-        return Cow::Borrowed(OFFSCREEN_SUGGESTION);
+        return format!(
+            "{OFFSCREEN_SUGGESTION} If semantic scrolling is unavailable, {}",
+            crate::headed_mode_suggestion("moves the pointer for physical scrolling")
+        );
     }
     if suggestion == WAITING_SUGGESTION
         && matches!(request.action, crate::Action::Select(_))
         && crate::tree::roles::is_item_collection_role(&evidence.state.role)
     {
-        Cow::Owned(format!("{ITEM_CLICK_PREFIX} {suggestion}"))
+        format!("{ITEM_CLICK_PREFIX} {suggestion}")
     } else {
-        suggestion
+        suggestion.into_owned()
     }
 }

@@ -20,11 +20,9 @@ pub(super) fn press_in_exact_window<A: SystemOps + ?Sized>(
             ErrorCode::ActionFailed,
             "The named window does not hold keyboard focus; no key was sent",
         )
-        .with_suggestion(if policy.is_headed() {
-            "Make sure the named window stays active before you retry; a sibling window or another application's menu can hold the keyboard"
-        } else {
-            "Bring the named window to the front yourself, or tell the user it is not in front. Use --headed only if the user asked for focus changes: it brings the named window forward first"
-        })
+        .with_suggestion(crate::response::headed_mode::window_focus_suggestion(
+            policy,
+        ))
         .with_details(serde_json::json!({
             "check": "window_active",
             "cause": "exact_window_focus_unconfirmed",
