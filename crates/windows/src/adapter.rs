@@ -1,9 +1,9 @@
 use agent_desktop_core::{
-    AccessibilityNode, ActionOps, AdapterError, AppInfo, ClipboardContent, ClipboardFormat,
-    Deadline, DragParams, ElementState, InputOps, InteractionLease, InteractionPolicy, KeyCombo,
-    LiveElement, MouseEvent, NativeHandle, ObservationOps, ObservationRequest, ObservationRoot,
-    OperationReport, ProcessIdentity, Rect, RefEntry, SnapshotSurface, SurfaceInfo, TreeOptions,
-    WindowFilter, WindowInfo,
+    AccessibilityNode, ActionOps, AdapterError, ClipboardContent, ClipboardFormat, Deadline,
+    DragParams, ElementState, InputOps, InteractionLease, InteractionPolicy, KeyCombo, LiveElement,
+    MouseEvent, NativeHandle, ObservationOps, ObservationRequest, ObservationRoot, OperationReport,
+    ProcessIdentity, Rect, RefEntry, SnapshotSurface, SurfaceInfo, TreeOptions, WindowFilter,
+    WindowInfo,
 };
 use std::collections::HashSet;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -191,8 +191,12 @@ impl ObservationOps for WindowsAdapter {
         crate::system::window::window_ops::list_windows_live(filter, deadline)
     }
 
-    fn list_apps(&self, deadline: Deadline) -> Result<Vec<AppInfo>, AdapterError> {
-        crate::system::app_ops::list_apps_live(deadline)
+    fn query_app_inventory(
+        &self,
+        query: agent_desktop_core::AppInventoryQuery<'_>,
+        deadline: Deadline,
+    ) -> Result<agent_desktop_core::AppInventory, AdapterError> {
+        Ok(query.answer(crate::system::app_ops::list_apps_live(deadline)?))
     }
 
     /// The per-process surface inventory. Window-backed surfaces carry the
