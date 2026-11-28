@@ -1,9 +1,10 @@
 use agent_desktop_core::{
-    ActionResult, AdapterError, AdapterSession, AppInfo, Deadline, DismissAllNotificationsRequest,
-    DismissNotificationRequest, DisplayInfo, ImageBuffer, InteractionLease, InteractionPolicy,
-    KeyCombo, NotificationActionRequest, NotificationFilter, NotificationInfo, ObservationOps,
-    OperationReport, PermissionReport, ProcessIdentity, ScreenshotTarget, SessionAffinity,
-    SignalBaseline, SignalFilter, SnapshotSurface, SystemOps, WindowFilter, WindowInfo, WindowOp,
+    ActionResult, AdapterError, AdapterSession, AppInfo, Deadline, DeliverySemantics,
+    DismissAllNotificationsRequest, DismissNotificationRequest, DisplayInfo, ImageBuffer,
+    InteractionLease, InteractionPolicy, KeyCombo, NotificationActionRequest, NotificationFilter,
+    NotificationInfo, ObservationOps, OperationReport, PermissionReport, ProcessIdentity,
+    ScreenshotTarget, SessionAffinity, SignalBaseline, SignalFilter, SnapshotSurface,
+    SurfaceOpening, SystemOps, WindowFilter, WindowInfo, WindowOp,
     system::launch_options::LaunchOptions, system::process_state::ProcessState,
 };
 
@@ -140,7 +141,7 @@ impl SystemOps for WindowsAdapter {
         surface: SnapshotSurface,
         policy: InteractionPolicy,
         lease: &InteractionLease,
-    ) -> Result<WindowInfo, AdapterError> {
+    ) -> Result<SurfaceOpening, AdapterError> {
         crate::system::shell::shell_surface_open::open_surface(surface, policy, lease.deadline())
     }
 
@@ -228,7 +229,11 @@ impl SystemOps for WindowsAdapter {
         crate::system::window::window_resolve::resolve_window_strict(win, deadline)
     }
 
-    fn focus_window(&self, win: &WindowInfo, lease: &InteractionLease) -> Result<(), AdapterError> {
+    fn focus_window(
+        &self,
+        win: &WindowInfo,
+        lease: &InteractionLease,
+    ) -> Result<DeliverySemantics, AdapterError> {
         crate::system::window::window_activate::focus_window(win, lease)
     }
 
@@ -349,7 +354,7 @@ impl SystemOps for WindowsAdapter {
         &self,
         request: DismissAllNotificationsRequest<'_>,
         _lease: &InteractionLease,
-    ) -> Result<(Vec<NotificationInfo>, Vec<String>), AdapterError> {
+    ) -> Result<(Vec<NotificationInfo>, Vec<AdapterError>), AdapterError> {
         crate::notifications::actions::dismiss_all(
             request.app_filter,
             request.policy,

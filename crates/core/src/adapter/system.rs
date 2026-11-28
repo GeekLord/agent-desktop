@@ -66,14 +66,14 @@ pub trait SystemOps: Send + Sync {
         Err(AdapterError::not_supported("start_permission_guide"))
     }
 
-    /// Performs the platform-native focus/raise operation for the exact window.
-    /// Core decides when focus is required; implementations must return only
-    /// after that window is confirmed focused, or return an error.
+    /// Performs the platform-native focus/raise for the exact window and
+    /// reports how far it got: `not_delivered` when nothing was sent,
+    /// `delivered_unverified` when core must confirm, or verified by the adapter.
     fn focus_window(
         &self,
         _win: &WindowInfo,
         _lease: &InteractionLease,
-    ) -> Result<(), AdapterError> {
+    ) -> Result<DeliverySemantics, AdapterError> {
         Err(AdapterError::not_supported("focus_window"))
     }
 
@@ -156,20 +156,23 @@ pub trait SystemOps: Send + Sync {
 
     /// Raises an OS-chrome surface - the Start menu, the Action Center, the
     /// taskbar - and returns the identity of the window the surface actually
-    /// presents, in the same shape the window observation stack consumes. It
-    /// takes the lease because it mutates OS chrome and takes the foreground;
-    /// the policy travels separately because the lease carries no
-    /// focus-steal refusal. Implementations that raise anything must refuse with
-    /// `POLICY_DENIED` first when `policy.allow_focus_steal` is false, must
-    /// return an already-present surface without raising it again, and
-    /// must answer a kind their platform does not expose with a refusal that
-    /// names what a caller should ask for instead - never with this default.
+    /// presents, in the same shape the window observation stack consumes, with
+    /// whether the adapter raised it. It takes the lease because it mutates OS
+    /// chrome and takes the foreground; the policy travels separately because
+    /// the lease carries no focus-steal refusal. Implementations that raise
+    /// anything must refuse with `POLICY_DENIED` first when
+    /// `policy.allow_focus_steal` is false, must return an already-present
+    /// surface as `SurfaceOpening::Present` without raising it again, must
+    /// return `SurfaceOpening::Raised` only after observing the raised surface
+    /// presented, and must answer a kind their platform does not expose with a
+    /// refusal that names what a caller should ask for instead - never with
+    /// this default.
     fn open_system_surface(
         &self,
         _surface: crate::adapter::SnapshotSurface,
         _policy: InteractionPolicy,
         _lease: &InteractionLease,
-    ) -> Result<WindowInfo, AdapterError> {
+    ) -> Result<crate::SurfaceOpening, AdapterError> {
         Err(AdapterError::not_supported("open_system_surface"))
     }
 
@@ -282,48 +285,7 @@ pub trait SystemOps: Send + Sync {
         policy: InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<ActionResult, AdapterError> {
-        let refusal = || {
-            AdapterError::new(
-                ErrorCode::ActionFailed,
-                "The named window does not hold keyboard focus; no key was sent",
-            )
-            .with_suggestion(if policy.is_headed() {
-                "Make sure the named window stays active before you retry; a sibling window or another application's menu can hold the keyboard"
-            } else {
-                "Bring the named window to the front yourself, or tell the user it is not in front. Use --headed only if the user asked for focus changes: it brings the named window forward first"
-            })
-            .with_details(serde_json::json!({
-                "check": "window_active",
-                "cause": "exact_window_focus_unconfirmed",
-                "physical_delivery_started": false,
-                "window_id": window.id,
-            }))
-            .with_disposition(crate::DeliverySemantics::not_delivered())
-        };
-        let instance = window
-            .process_instance
-            .as_deref()
-            .filter(|instance| !instance.is_empty())
-            .ok_or_else(|| {
-                AdapterError::stale_ref_because("The named window has no process identity")
-                    .with_suggestion("Run 'list-windows' again and use the window's current id")
-            })?;
-        let focused = self
-            .focused_window(lease.deadline())
-            .map_err(AdapterError::unsent)?;
-        if !focused.is_some_and(|focused| {
-            focused.id == window.id
-                && focused.pid == window.pid
-                && focused.process_instance.as_deref() == Some(instance)
-        }) {
-            return Err(refusal());
-        }
-        self.press_key_for_app(
-            ProcessIdentity::new(window.pid, instance),
-            combo,
-            policy,
-            lease,
-        )
+        super::window_key_gate::press_in_exact_window(self, window, combo, policy, lease)
     }
 
     fn wait_for_menu(
@@ -382,7 +344,7 @@ pub trait SystemOps: Send + Sync {
         &self,
         _request: DismissAllNotificationsRequest<'_>,
         _lease: &InteractionLease,
-    ) -> Result<(Vec<NotificationInfo>, Vec<String>), AdapterError> {
+    ) -> Result<(Vec<NotificationInfo>, Vec<AdapterError>), AdapterError> {
         Err(AdapterError::not_supported("dismiss_all_notifications"))
     }
 

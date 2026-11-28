@@ -124,8 +124,8 @@ macro_rules! exact_window_focus {
             &self,
             _window: &$crate::WindowInfo,
             _lease: &$crate::InteractionLease,
-        ) -> Result<(), $crate::AdapterError> {
-            Ok(())
+        ) -> Result<$crate::DeliverySemantics, $crate::AdapterError> {
+            Ok($crate::DeliverySemantics::delivered_unverified())
         }
     };
 }

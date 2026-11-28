@@ -140,8 +140,8 @@ impl SystemOps for EnvelopeAdapter {
         &self,
         _window: &WindowInfo,
         _lease: &InteractionLease,
-    ) -> Result<(), AdapterError> {
-        Ok(())
+    ) -> Result<agent_desktop_core::DeliverySemantics, AdapterError> {
+        Ok(agent_desktop_core::DeliverySemantics::delivered_unverified())
     }
 }
 

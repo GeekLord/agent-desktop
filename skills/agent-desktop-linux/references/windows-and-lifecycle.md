@@ -49,14 +49,23 @@ agent-desktop launch gnome-text-editor --arg=/tmp/note.txt
   tell an app you started from a session service.
 - An absolute `.desktop` path launches that exact file inside the trusted XDG
   data directories. Desktop ids use XDG directory precedence.
-- `launch` attaches to a running process only when the resolved executable
-  equals its `/proc/<pid>/exe` and the full arguments and invocation name match.
-  Missing evidence starts a new process; names alone never attach. A launcher
-  that hands off to another executable is not followed by name: if no verified
-  owner appears, `launch` reports the unresolved handoff.
-- One verified match with no arguments returns the owner; arguments spawn the
-  command to forward them. `--no-attach` refuses any verified running match with
-  `ACTION_FAILED` naming its pids; without it, several verified matches are
+- `launch` names a running process only when the resolved executable equals
+  its `/proc/<pid>/exe` and the invocation name and the entry's own arguments
+  match. A single-letter switch in the desktop entry's `Exec`, such as
+  `kate -b`, is a launcher switch and is not compared, and neither are the
+  caller's `--arg` values. A launch of a script matches the interpreter
+  process that runs that script (`python3 /usr/bin/update-manager`), never
+  another script of the same interpreter. Missing evidence starts a new
+  process; names alone never attach.
+- One verified match with no arguments returns the owner. With arguments the
+  command is spawned so that it forwards them to the running instance; a
+  launcher that exits cleanly and shows no owner within about 2 s ends as
+  `ok: true`, `delivered_unverified`, with no `window` and a `suggestion` that
+  points at `list-windows`. `--no-attach` refuses any running process of the same program (the same
+  executable, or the interpreter running the same script) whatever its
+  arguments,
+  with or without `--arg`, before anything is sent: `ACTION_FAILED`,
+  `not_delivered`, with the pids. Without it, several verified matches are
   `AMBIGUOUS_TARGET`.
 - `--arg` passes one argument and repeats; `--arg --info` works as written, and
   `--arg=-x` is the safe form for a value that starts with a hyphen. A handoff to
@@ -86,6 +95,11 @@ agent-desktop launch gnome-text-editor --arg=/tmp/note.txt
   process still running outside the registry can be returned without a window,
   and may be a wrapper. When no window appears the result can be `ok` with no
   `window`.
+- `data.disposition` reports what the launch proved: `not_delivered` when it
+  attached and sent nothing — no `--activate`, or an `--activate` whose target
+  was already active — `delivered_verified` when the owner was read
+  back as a new instance or `--activate` was confirmed, and
+  `delivered_unverified` otherwise — including the unlisted-process case above.
 - A launcher that exits with no owner is `ACTION_FAILED`,
   `details.kind: exited` (`crashed` after a signal), `delivered_unverified`. An
   owner that exits before its window appears is `ACTION_FAILED`,
@@ -255,8 +269,8 @@ safe to repeat.
 - A minimized or hidden target is lifted first. A stopped target is
   `APP_UNRESPONSIVE` before anything is sent.
 - When a modal dialog holds the focus, `focus-window --app <name>` succeeds with
-  the dialog as `data.focused`. Read `data.focused.title` and act on the dialog,
-  not the window you named.
+  the dialog as `data.focused` and `disposition: delivered_verified`. Read
+  `data.focused.title` and act on the dialog, not the window you named.
 - A window the manager never activated can end `ACTION_FAILED` with cause
   `activation_not_granted` (under mutter, until a window has held focus once).
   Other timeouts end with `activation_refused` (another window stayed active) or

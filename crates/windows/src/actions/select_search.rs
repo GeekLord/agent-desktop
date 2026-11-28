@@ -1,6 +1,6 @@
 //! Bounded SelectionItem descendant search and its realize scroll steps (A19-7).
 
-use agent_desktop_core::{AdapterError, Deadline, ErrorCode};
+use agent_desktop_core::{AdapterError, Deadline, ErrorCode, normalize_search_text};
 
 use crate::tree::element::UIAElement;
 
@@ -11,6 +11,9 @@ fn select_node_budget_has_room(visited: usize, pending: usize, staged: usize) ->
     visited.saturating_add(pending).saturating_add(staged) < MAX_SELECT_NODES
 }
 
+fn names_equal(left: &str, right: &str) -> bool {
+    normalize_search_text(left) == normalize_search_text(right)
+}
 /// Second same-name SelectionItem is `AMBIGUOUS_TARGET`, never a silent pick.
 pub(crate) fn accept_selection_match(already_found: bool) -> Result<(), AdapterError> {
     if already_found {
@@ -46,7 +49,7 @@ pub(crate) fn admit_selection_match<T: Clone>(
 mod imp {
     use super::{
         AdapterError, Deadline, ErrorCode, MAX_SELECT_DEPTH, MAX_SELECT_NODES, UIAElement,
-        admit_selection_match, select_node_budget_has_room,
+        admit_selection_match, names_equal, select_node_budget_has_room,
     };
     use crate::actions::mutation::{classify_success, classify_write};
     use crate::actions::scroll::SCROLL_LABEL;
@@ -160,7 +163,7 @@ mod imp {
         let (name, _) = name_fields(&properties, &label);
         matches!(
             name,
-            LocatorField::Known(text) if text.eq_ignore_ascii_case(value)
+            LocatorField::Known(text) if names_equal(&text, value)
         )
     }
 
@@ -244,9 +247,18 @@ pub(crate) use imp::{realize_scroll_step, scroll_to_position};
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SELECT_DEPTH, MAX_SELECT_NODES, accept_selection_match, select_node_budget_has_room,
+        MAX_SELECT_DEPTH, MAX_SELECT_NODES, accept_selection_match, names_equal,
+        select_node_budget_has_room,
     };
     use agent_desktop_core::ErrorCode;
+
+    #[test]
+    fn names_compare_by_the_one_core_name_form() {
+        assert!(names_equal("Éa", "éa"));
+        assert!(names_equal("  a \t b ", "A b"));
+        assert!(!names_equal("a", "b"));
+        assert!(!names_equal("a b", "ab"));
+    }
 
     #[test]
     fn select_search_depth_budget_is_eight() {

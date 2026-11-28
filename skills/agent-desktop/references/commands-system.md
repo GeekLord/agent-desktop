@@ -11,15 +11,20 @@ agent-desktop launch "MyTool" --arg /tmp/notes.txt --env KEY=VALUE --no-attach
 agent-desktop launch "Obsidian" --cdp
 ```
 
-`launch` returns once the process runs. The identifier differs by OS: the examples use macOS display names, and the platform skill names the form for its OS. By default it attaches to a running instance. `--no-attach` starts a fresh instance instead of attaching: on Windows it returns `ACTION_FAILED` if a matching app is already running; on macOS it launches a second instance alongside the running one. For an `--arg` value that starts with `-`, use `--arg=<value>`.
+`launch` returns when its process is running and a window is seen, when the launched process and everything it started have exited without a window, or at the timeout. A launcher that exits after it hands its work to another process (a stub such as `control.exe`) ends the wait at once: the result keeps the launcher's pid, carries no `window`, reports `delivered_unverified`, and its `suggestion` points at `list-windows`. A window owned by a process the launcher started is reported with that process as the owner. The identifier differs by OS: the examples use macOS display names, and the platform skill names the form for its OS.
+
+By default `launch` attaches to a running instance and sends nothing. An attached result carries the pid of an instance this call did not start; never close it as your own. `--no-attach` requires a fresh instance and follows one rule on every platform: when an instance of the app already runs, it returns `ACTION_FAILED` with `not_delivered` and the running pids, before anything is sent. Launch without `--no-attach` to attach, or close the running instance first.
+
+`--arg` passes arguments to the app; for a value that starts with `-`, use `--arg=<value>`. A launch that carries arguments never attaches silently: Windows and Linux start the program, which hands the arguments to the running instance the way the system does (`delivered_unverified`, since the arrival is not read back). On macOS, an argument that is an explicit path to an existing file (absolute, starting with `./` or `~/`, or a `file://` URL) is a document; a bare word is always an argument, even when a file of that name exists: Launch Services opens it with the app, which also gives a sandboxed app access to it, and a running instance receives it (`delivered_unverified`). Any other macOS argument reaches only a process that starts, so a launch that aims such an argument at a running instance returns `ACTION_FAILED` with `not_delivered` and sends nothing.
 
 The process running and the app showing a window are separate facts:
 
 ```json
-{ "app": "TextEdit", "pid": 611, "window": { "id": "w-110407", "title": "Open", "visible": true } }
+{ "app": "TextEdit", "pid": 611, "disposition": { "delivery": "delivered_verified", "retry": "unsafe" }, "window": { "id": "w-110407", "title": "Open", "visible": true } }
 ```
 
 - `window` is present when the app has exactly one window it can name. It is omitted when the app has none or when it has several and none is focused. `window.bounds` is omitted while the window server has not set them yet; it is never `0x0`. The absence of `window` is not a failure. `launch` still returns `ok: true`; run `list-windows --app` for every window.
+- `disposition` reports what the launch proved: `not_delivered` when it attached to a running app and sent nothing — no `--activate`, or an `--activate` whose target was already active (`retry: "safe"`) — `delivered_verified` when the new process instance was read back or `--activate` was confirmed frontmost, and `delivered_unverified` otherwise — including a spawned process that never reached the accessibility bus.
 - A document-based app may open its first window only when brought forward. Use `--activate`: it asks the app to present a window and waits for it up to `--timeout` (default 30000). This brings the app forward, so it needs `--headed`; headless, `--activate` returns `POLICY_DENIED` and nothing is launched. Or trigger the window yourself and use `wait --event window-opened`.
 - A process that exits before it shows a window returns `APP_UNRESPONSIVE`.
 - Windowless and menu-bar-only apps report no `window`. Use `list-apps` and read `presentation`.
@@ -55,6 +60,8 @@ and click its own Close button ref, then confirm the close with a `batch` of the
 click and `wait --event window-closed`. Answer any save prompt through its
 sheet. For the last window, use `close-app` if you intend to exit the app.
 Ctrl+W may close only a tab or document, leaving the window open.
+On macOS a graceful `close-app` stops on an open alert or sheet: `ACTION_FAILED`, `details.cause: modal_pending`, with the prompt's kind and title. It is `not_delivered` when the prompt was open before the request and `delivered_unverified` when the request raised it. Answer the prompt, or use `--force`.
+
 On Linux a headless graceful `close-app` is `POLICY_DENIED`, `details.kind:
 may_prompt`, because a save prompt would take the foreground; use `--force`
 (discards unsaved work) or `--headed`.
@@ -83,7 +90,7 @@ agent-desktop minimize --app "TextEdit"   # maximize, restore likewise
 
 - `list-windows` returns `{ id, title, app_name, pid, bounds, is_focused, accessible }`. Use a `w-<id>` with `--window-id` when an app has several windows.
 - `accessible: false` means semantic commands cannot reach that window. Targeting it returns `ACTION_NOT_SUPPORTED` with `kind: "window_without_accessibility_element"`. It still accepts screenshots and coordinate input. Choose another window. Wait polling treats this error as transient. In particular, `--wait-for-gone` does not count it as absence; it keeps polling until the window disappears from the inventory or the wait times out.
-- `focus-window` needs at least one identifier and `--headed`, because it raises the window and takes key focus. Headless, it returns `POLICY_DENIED` before any window is read. It confirms the OS reports that window as focused. Otherwise it returns `ACTION_FAILED`.
+- `focus-window` needs at least one identifier and `--headed`, because it raises the window and takes key focus. Headless, it returns `POLICY_DENIED` before any window is read. It confirms the OS reports that window as focused and reports `disposition: delivered_verified`. Otherwise it returns `ACTION_FAILED`.
 - `restore` undoes a minimize and returns the window to its earlier placement. It does not promise to un-maximize.
 
 ## Notifications
@@ -95,7 +102,7 @@ Commands: `list-notifications`, `dismiss-notification`, `dismiss-all-notificatio
 - Every mutation needs `--headed`. A single-notification mutation also needs a fingerprint from the same listing: `--expected-app` or `--expected-title`. Notifications reorder between listings. When the row at the index no longer matches, the call returns `NOTIFICATION_NOT_FOUND` and presses nothing. Without a fingerprint, `INVALID_ARGS`.
 - `list-notifications` returns `{ index, app_name, title, body, actions }`, with 1-based indexes. `--app`, `--text`, `--limit` filter.
 - `notification-action INDEX "Reply"` clicks a named button. An action the entry lacks returns `ACTION_NOT_SUPPORTED` and changes nothing.
-- `dismiss-all-notifications` returns `{ dismissed_count, failures, failed_count }`. A failure to close the surface afterward is not reported as an error.
+- `dismiss-notification` returns the removed entry as `data.dismissed` with `disposition: delivered_verified`. `dismiss-all-notifications` returns `{ dismissed_count, failures, failed_count }`; its `disposition` comes from each entry's own delivery: `not_delivered` (`retry: safe`) when nothing was found or every failure was never dispatched, `delivered_verified` (`retry: unsafe`) when every entry was dismissed, `delivered_unverified` (`retry: unsafe`) when any entry's dispatch started, and `delivered_verified` (`retry: unsafe`) for a partial clear whose failures were all never dispatched — a re-run captures a fresh listing, so it stays unsafe even though `failures` names what remains. An entry that vanishes before its turn counts as dismissed. A failure to close the surface afterward is not reported as an error.
 - `wait --notification` detects a new entry against a baseline taken at wait start. Transient errors retry within `--timeout`. On macOS and Windows, a headless wait sees only an already-open surface.
 
 ## Clipboard

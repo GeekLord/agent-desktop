@@ -163,8 +163,8 @@ impl SystemOps for SingleShotScrollAdapter {
         &self,
         _window: &crate::WindowInfo,
         _lease: &InteractionLease,
-    ) -> Result<(), AdapterError> {
-        Ok(())
+    ) -> Result<crate::DeliverySemantics, AdapterError> {
+        Ok(crate::DeliverySemantics::delivered_unverified())
     }
 }
 

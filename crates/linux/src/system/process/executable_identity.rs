@@ -179,16 +179,65 @@ impl ExecutableIdentity {
     /// bare launch it serves. A launch that asks for a mode, such as `--gui`,
     /// is not a process running in another mode, and a launch is never a
     /// process running other code or another file.
+    #[cfg(test)]
     pub(crate) fn is_running_as(&self, running: &Self) -> bool {
-        let (Some(argv), Some(actual)) = (self.argv.as_deref(), running.argv.as_deref()) else {
+        self.is_running_as_with(running, false)
+    }
+
+    /// `is_running_as`, where the running process may also carry documents it
+    /// was asked to open. A launcher whose command takes files or URLs is
+    /// the same application with or without them; for any other command a
+    /// path is code or another file, as with an interpreter's script.
+    pub(crate) fn is_running_as_with(&self, running: &Self, documents: bool) -> bool {
+        let Some(argv) = self.argv.as_deref() else {
             return false;
         };
-        if self.executable != running.executable || !same_invocation(argv, actual) {
+        let Some(actual) = self.program_arguments(running) else {
+            return false;
+        };
+        if !same_invocation(argv, actual) {
             return false;
         }
         let mut rest = actual[1..].iter();
-        consume_in_order(&argv[1..], &mut rest) && rest.all(is_bare_long_option)
+        consume_in_order(&argv[1..], &mut rest)
+            && rest.all(|word| {
+                is_bare_long_option(word)
+                    || is_short_switch(word)
+                    || (documents && is_document(word))
+            })
     }
+
+    /// Whether the running process is this launch's program: the same
+    /// executable image, or the interpreter running the launch's script.
+    pub(crate) fn same_program(&self, running: &Self) -> bool {
+        self.executable == running.executable || self.program_arguments(running).is_some()
+    }
+
+    /// The process's words from the program on. A process of the launch's own
+    /// image is read whole. When the launch is a script and the process is the
+    /// interpreter the script's `#!` line names, running that script, the
+    /// words are the ones from the script on, so the script path stands where
+    /// the launch's program stands. Any other process has none.
+    fn program_arguments<'a>(&self, running: &'a Self) -> Option<&'a [OsString]> {
+        let actual = running.argv.as_deref()?;
+        if self.executable == running.executable {
+            return Some(actual);
+        }
+        script_run(&self.executable, &running.executable, actual)
+    }
+}
+
+/// An absolute path or a URL: what an application is asked to open.
+fn is_document(word: &OsString) -> bool {
+    let bytes = word.as_encoded_bytes();
+    bytes.starts_with(b"/") || bytes.windows(3).any(|window| window == b"://")
+}
+
+/// A single-letter switch such as `-b`: a mode of the process, never other
+/// code or another file, so a launch without it still names the process.
+fn is_short_switch(word: &OsString) -> bool {
+    let bytes = word.as_encoded_bytes();
+    bytes.len() == 2 && bytes[0] == b'-' && bytes[1] != b'-'
 }
 
 fn compared(argv: &[OsString]) -> Vec<&OsString> {
@@ -210,3 +259,11 @@ fn same_invocation(expected: &[OsString], actual: &[OsString]) -> bool {
 #[cfg(test)]
 #[path = "executable_identity_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "executable_identity_switch_tests.rs"]
+mod switch_tests;
+
+#[cfg(test)]
+#[path = "executable_identity_script_tests.rs"]
+mod script_tests;

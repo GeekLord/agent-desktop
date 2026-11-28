@@ -35,8 +35,7 @@ pub(in crate::system) fn resolve_immersive(
     landmarks: &[&str],
     deadline: Deadline,
 ) -> Result<Option<WindowInfo>, AdapterError> {
-    let narrow = crate::system::window::listing_retry::narrow_to_permitted_codes;
-    let client = crate::tree::automation::automation_client().map_err(narrow)?;
+    let client = crate::tree::automation::automation_client()?;
     let children = desktop_root_children(&client, deadline)?;
     for child in children {
         if let Some(info) =
@@ -57,26 +56,16 @@ fn desktop_root_children(
 ) -> Result<Vec<uiautomation::UIElement>, AdapterError> {
     use uiautomation::types::TreeScope;
 
-    let narrow = crate::system::window::listing_retry::narrow_to_permitted_codes;
     super::shell_surface::retry_transient_read(deadline, || {
         let root = client.get_root_element().map_err(|error| {
-            narrow(crate::tree::automation::uia_error(
-                &error,
-                "read the UIA desktop root",
-            ))
+            crate::tree::automation::uia_error(&error, "read the UIA desktop root")
         })?;
         let condition = client.create_true_condition().map_err(|error| {
-            narrow(crate::tree::automation::uia_error(
-                &error,
-                "build the desktop children condition",
-            ))
+            crate::tree::automation::uia_error(&error, "build the desktop children condition")
         })?;
         root.find_all(TreeScope::Children, &condition)
             .map_err(|error| {
-                narrow(crate::tree::automation::uia_error(
-                    &error,
-                    "read the UIA desktop root's children",
-                ))
+                crate::tree::automation::uia_error(&error, "read the UIA desktop root's children")
             })
     })
 }
@@ -144,8 +133,7 @@ pub(in crate::system) fn window_is_surface(
     if !hosted {
         return Ok(false);
     }
-    let narrow = crate::system::window::listing_retry::narrow_to_permitted_codes;
-    let client = crate::tree::automation::automation_client().map_err(narrow)?;
+    let client = crate::tree::automation::automation_client()?;
     let Ok(element) =
         client.element_from_handle(uiautomation::types::Handle::from(handle as isize))
     else {
@@ -214,8 +202,7 @@ pub(in crate::system) fn raise_presented_foreign_shape(
 pub(in crate::system) fn witness_immersive_children(
     deadline: Deadline,
 ) -> Result<Vec<isize>, AdapterError> {
-    let narrow = crate::system::window::listing_retry::narrow_to_permitted_codes;
-    let client = crate::tree::automation::automation_client().map_err(narrow)?;
+    let client = crate::tree::automation::automation_client()?;
     let children = desktop_root_children(&client, deadline)?;
     let mut handles = Vec::new();
     for child in children {
@@ -287,11 +274,7 @@ fn carries_landmark(
     for landmark in landmarks {
         let condition = client
             .create_property_condition(UIProperty::AutomationId, Variant::from(*landmark), None)
-            .map_err(|error| {
-                crate::system::window::listing_retry::narrow_to_permitted_codes(
-                    crate::tree::automation::uia_error(&error, context),
-                )
-            })?;
+            .map_err(|error| crate::tree::automation::uia_error(&error, context))?;
         if landmark_search_answer(
             candidate.find_first(TreeScope::Descendants, &condition),
             context,
@@ -304,7 +287,7 @@ fn carries_landmark(
 
 /// The one decision the landmark search shares: a found element is present,
 /// an absence-family failure is absence, and any other failure surfaces
-/// narrowed onto the closed set this crate's read paths report.
+/// with the code and stamp its source gave it.
 fn landmark_search_answer(
     found: Result<uiautomation::UIElement, uiautomation::Error>,
     context: &'static str,
@@ -315,11 +298,7 @@ fn landmark_search_answer(
             if crate::tree::automation::failure_of(&error).is_absence() {
                 return Ok(false);
             }
-            Err(
-                crate::system::window::listing_retry::narrow_to_permitted_codes(
-                    crate::tree::automation::uia_error(&error, context),
-                ),
-            )
+            Err(crate::tree::automation::uia_error(&error, context))
         }
     }
 }

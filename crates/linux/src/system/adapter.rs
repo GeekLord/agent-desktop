@@ -2,11 +2,12 @@ use agent_desktop_core::system::launch_options::LaunchOptions;
 use agent_desktop_core::system::launch_result::LaunchResult;
 use agent_desktop_core::system::process_state::ProcessState;
 use agent_desktop_core::{
-    ActionResult, AdapterError, AdapterSession, AppInfo, Deadline, DismissAllNotificationsRequest,
-    DismissNotificationRequest, DisplayInfo, ImageBuffer, InteractionLease, InteractionPolicy,
-    KeyCombo, NotificationActionRequest, NotificationFilter, NotificationInfo, OperationReport,
-    PermissionReport, ProcessIdentity, ScreenshotTarget, SessionAffinity, SignalBaseline,
-    SignalFilter, SnapshotSurface, SystemOps, WindowInfo, WindowOp,
+    ActionResult, AdapterError, AdapterSession, AppInfo, Deadline, DeliverySemantics,
+    DismissAllNotificationsRequest, DismissNotificationRequest, DisplayInfo, ImageBuffer,
+    InteractionLease, InteractionPolicy, KeyCombo, NotificationActionRequest, NotificationFilter,
+    NotificationInfo, OperationReport, PermissionReport, ProcessIdentity, ScreenshotTarget,
+    SessionAffinity, SignalBaseline, SignalFilter, SnapshotSurface, SurfaceOpening, SystemOps,
+    WindowInfo, WindowOp,
 };
 
 use crate::adapter::LinuxAdapter;
@@ -75,8 +76,18 @@ impl SystemOps for LinuxAdapter {
         crate::system::list_displays(deadline)
     }
 
-    fn focus_window(&self, win: &WindowInfo, lease: &InteractionLease) -> Result<(), AdapterError> {
-        crate::system::focus::focus_window::focus_window(self.bus(), win, lease)
+    fn focus_window(
+        &self,
+        win: &WindowInfo,
+        lease: &InteractionLease,
+    ) -> Result<DeliverySemantics, AdapterError> {
+        crate::system::focus::focus_window::focus_window(self.bus(), win, lease).map(|activation| {
+            if activation.dispatched() {
+                DeliverySemantics::delivered_unverified()
+            } else {
+                DeliverySemantics::not_delivered()
+            }
+        })
     }
 
     fn close_app(
@@ -231,7 +242,7 @@ impl SystemOps for LinuxAdapter {
         &self,
         request: DismissAllNotificationsRequest<'_>,
         lease: &InteractionLease,
-    ) -> Result<(Vec<NotificationInfo>, Vec<String>), AdapterError> {
+    ) -> Result<(Vec<NotificationInfo>, Vec<AdapterError>), AdapterError> {
         notifications::dismiss_all(self.bus(), request, lease)
     }
 
@@ -270,7 +281,7 @@ impl SystemOps for LinuxAdapter {
         surface: SnapshotSurface,
         policy: InteractionPolicy,
         lease: &InteractionLease,
-    ) -> Result<WindowInfo, AdapterError> {
+    ) -> Result<SurfaceOpening, AdapterError> {
         shell::open_surface(self.bus(), surface, policy, lease)
     }
 }

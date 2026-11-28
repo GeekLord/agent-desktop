@@ -1,3 +1,4 @@
+use super::launch_watch::{Target, observe_window_once};
 use super::*;
 use agent_desktop_core::{
     AppError, Deadline, DeliverySemantics, ErrorCode, ErrorPayload, ProcessId,
@@ -13,20 +14,16 @@ use std::path::{Path, PathBuf};
 mod live;
 
 #[test]
-fn zero_wait_never_polls_after_first_observation() {
-    assert!(!should_poll_after_first_observation(0));
-    assert!(should_poll_after_first_observation(1));
-}
-
-#[test]
 fn ambiguous_launch_target_suggestion_names_pids_instead_of_a_ref_retry() {
     let matches = vec![
         ProcessRow {
             pid: ProcessId::from(111),
+            parent: ProcessId::from(1),
             name: "Cursor.exe".into(),
         },
         ProcessRow {
             pid: ProcessId::from(222),
+            parent: ProcessId::from(1),
             name: "Cursor.exe".into(),
         },
     ];
@@ -56,10 +53,12 @@ fn shared_ambiguous_target_pins_the_windows_envelope() {
     let matches = vec![
         ProcessRow {
             pid: ProcessId::from(10),
+            parent: ProcessId::from(1),
             name: "Cursor.exe".into(),
         },
         ProcessRow {
             pid: ProcessId::from(11),
+            parent: ProcessId::from(1),
             name: "Cursor.exe".into(),
         },
     ];
@@ -93,7 +92,13 @@ fn observe_window_once_tolerates_an_expired_deadline_as_no_window_observed() {
     let pid = ProcessId::from(std::process::id());
     let expired = Deadline::after(0).expect("a zero-timeout deadline is constructible");
 
-    let observed = observe_window_once(pid, "irrelevant-instance", expired)
+    let target = Target {
+        pid,
+        process_instance: "irrelevant-instance",
+        started_ms: 0,
+        resident: None,
+    };
+    let observed = observe_window_once(&target, expired)
         .expect("a Timeout from the inventory must be tolerated, not propagated");
 
     assert!(

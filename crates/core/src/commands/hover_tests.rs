@@ -136,9 +136,9 @@ impl SystemOps for HoverCaptureAdapter {
         &self,
         window: &crate::WindowInfo,
         _lease: &crate::InteractionLease,
-    ) -> Result<(), AdapterError> {
+    ) -> Result<crate::DeliverySemantics, AdapterError> {
         self.focused_pids.lock().unwrap().push(window.pid);
-        Ok(())
+        Ok(crate::DeliverySemantics::delivered_unverified())
     }
 }
 
@@ -354,8 +354,8 @@ impl SystemOps for StaleThenOkAdapter {
         &self,
         _window: &crate::WindowInfo,
         _lease: &crate::InteractionLease,
-    ) -> Result<(), AdapterError> {
-        Ok(())
+    ) -> Result<crate::DeliverySemantics, AdapterError> {
+        Ok(crate::DeliverySemantics::delivered_unverified())
     }
 }
 

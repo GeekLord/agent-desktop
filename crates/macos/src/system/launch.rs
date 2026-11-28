@@ -1,18 +1,20 @@
 use agent_desktop_core::{
-    AdapterError, AppInfo, Deadline, DeliverySemantics, ErrorCode, WindowInfo,
-    system::launch_options::LaunchOptions, system::launch_result::LaunchResult,
+    AdapterError, AppInfo, Deadline, DeliverySemantics, ErrorCode, LaunchArrival, LaunchFacts,
+    LaunchGuidance, WindowInfo, system::launch_options::LaunchOptions,
+    system::launch_result::LaunchResult,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use super::launch_window::{LaunchWindow, exact_window, windowless};
+use super::launch_plan::{LaunchArguments, LaunchPlan, plan};
+use super::launch_window::exact_window;
 
 const MAX_ARGUMENT_COUNT: usize = 256;
 const MAX_ENVIRONMENT_COUNT: usize = 256;
 const MAX_LAUNCH_TEXT_BYTES: usize = 1024 * 1024;
-const STARTUP_GRACE: Duration = Duration::from_millis(1500);
 
 enum LaunchTarget {
     Existing { pid: i32, process_instance: String },
+    Forwarded { pid: i32, process_instance: String },
     New { baseline_instances: Vec<String> },
 }
 
@@ -31,101 +33,42 @@ pub(crate) fn launch_app_impl(
     };
     ensure_launch_budget(deadline, id).map_err(before_launch)?;
     let initial = matching_apps(id, deadline).map_err(before_launch)?;
-    if options.attach_if_running && initial.len() == 1 && !options.activate {
-        let app = initial[0].clone();
-        let instance = required_instance(&app).map_err(before_launch)?;
-        let pid = super::process::process_identity::to_pid_t(app.pid).map_err(before_launch)?;
-        let window = exact_window(pid, &instance, deadline).map_err(before_launch)?;
-        return Ok(result_from_app(&app, window.report()));
+    let arguments = LaunchArguments::classify(&options.args);
+    let launch_plan = plan(initial.len(), options, &arguments);
+    match launch_plan {
+        LaunchPlan::RefuseRunning => {
+            return Err(agent_desktop_core::launch_already_running(
+                id,
+                &initial.iter().map(|app| app.pid).collect::<Vec<_>>(),
+            ));
+        }
+        LaunchPlan::RefuseArguments => return Err(arguments_cannot_reach(id, &arguments)),
+        LaunchPlan::Ambiguous => return Err(before_launch(ambiguous_apps(&initial))),
+        LaunchPlan::Attach => {
+            let app = initial[0].clone();
+            let instance = required_instance(&app).map_err(before_launch)?;
+            let pid = super::process::process_identity::to_pid_t(app.pid).map_err(before_launch)?;
+            let window = exact_window(pid, &instance, deadline).map_err(before_launch)?;
+            return Ok(result_from_app(&app, window.report()));
+        }
+        LaunchPlan::Fresh | LaunchPlan::Activate | LaunchPlan::Forward => {}
     }
-    let target = launch_target(options, initial).map_err(before_launch)?;
+    let target = launch_target(launch_plan, initial).map_err(before_launch)?;
 
-    let launched = crate::system::launch_workspace::open(id, options, deadline)?;
+    let launched = crate::system::launch_workspace::open(id, options, &arguments, deadline)?;
     validate_launched_target(&target, &launched).map_err(after_launch)?;
-    let window =
-        settled_window(launched.0, &launched.1, options, deadline).map_err(after_launch)?;
-    result_from_launched(&launched, window, id).map_err(after_launch)
-}
-
-/// Waits only for the windows the launch itself produces. Starting up is what
-/// creates them, so once the application reports that it finished starting up,
-/// every window it was going to open on its own already exists and further
-/// polling can only run out the deadline. An application that opens its first
-/// window in response to being brought forward — TextEdit, Preview, any
-/// document-based application — reports no window here, and `activate` is how a
-/// caller asks for one instead of waiting for one it never requested.
-#[cfg(target_os = "macos")]
-fn settled_window(
-    pid: i32,
-    process_instance: &str,
-    options: &LaunchOptions,
-    deadline: Deadline,
-) -> Result<Option<WindowInfo>, AdapterError> {
-    let mut poll_interval = Duration::from_millis(25);
-    let mut grace_ends_at = None;
-    let mut last_read_failure: Option<AdapterError>;
-    let mut unplaced = None;
-    let end = |unplaced: Option<LaunchWindow>, failure: Option<AdapterError>| match (
-        unplaced.and_then(LaunchWindow::report),
-        failure,
-    ) {
-        (Some(window), _) => Ok(Some(window)),
-        (None, Some(error)) => Err(error),
-        (None, None) => windowless(pid, process_instance),
-    };
-    loop {
-        match exact_window(pid, process_instance, deadline) {
-            Ok(LaunchWindow::Placed(window)) => return Ok(Some(window)),
-            Ok(LaunchWindow::Unnamed) => return windowless(pid, process_instance),
-            Ok(window @ LaunchWindow::Unplaced(_)) => {
-                unplaced = Some(window);
-                last_read_failure = None;
-            }
-            Ok(LaunchWindow::Absent) => last_read_failure = None,
-            Err(error) if window_read_is_not_ready_yet(&error) => last_read_failure = Some(error),
-            Err(error) => return Err(error),
-        }
-        if options.timeout_ms == 0
-            || (!options.activate && grace_over(grace_ends_at, Instant::now()))
-        {
-            return end(unplaced, last_read_failure);
-        }
-        if grace_ends_at.is_none() && startup_finished(pid, process_instance)? {
-            grace_ends_at = Instant::now().checked_add(STARTUP_GRACE);
-        }
-        let remaining = deadline.remaining();
-        if remaining.is_zero() {
-            return end(unplaced, last_read_failure);
-        }
-        std::thread::sleep(poll_interval.min(remaining));
-        poll_interval = (poll_interval * 3 / 2).min(Duration::from_millis(250));
+    let window = super::launch_settled::settled_window(launched.0, &launched.1, options, deadline)
+        .map_err(after_launch)?;
+    let mut facts = target_facts(&target);
+    if let LaunchTarget::Existing {
+        pid,
+        process_instance,
+    } = &target
+    {
+        facts.postcondition_observed =
+            super::launch_frontmost::frontmost_is(*pid, process_instance, deadline);
     }
-}
-
-#[cfg(target_os = "macos")]
-fn window_read_is_not_ready_yet(error: &AdapterError) -> bool {
-    matches!(error.code, ErrorCode::AppUnresponsive | ErrorCode::Timeout)
-}
-
-/// Ends the wait when the application has created whatever windows its launch
-/// produces. The window server keeps no record of a process that exited, and
-/// none of one that has not registered yet, so libproc decides which happened:
-/// a process that is gone ends the launch with an error rather than an answer
-/// about windows it will never open.
-#[cfg(target_os = "macos")]
-fn startup_finished(pid: i32, process_instance: &str) -> Result<bool, AdapterError> {
-    use crate::system::appkit_bridge::StartupState;
-    match crate::system::appkit_bridge::startup_state(pid) {
-        StartupState::Starting => Ok(false),
-        StartupState::Finished => Ok(true),
-        StartupState::NoRecord => {
-            if super::process::process_identity::matches_instance(pid, process_instance)? {
-                Ok(true)
-            } else {
-                Err(launch_target_gone(pid))
-            }
-        }
-    }
+    result_from_launched(&launched, window, id, facts).map_err(after_launch)
 }
 
 #[cfg(target_os = "macos")]
@@ -136,14 +79,6 @@ pub(super) fn launch_target_gone(pid: i32) -> AdapterError {
     )
     .with_details(serde_json::json!({ "pid": pid, "complete": false }))
     .with_suggestion("Check the application's own launch requirements, then retry.")
-}
-
-/// The grace covers the gap between an application reporting that it started
-/// and its first window reaching the window server. Waiting starts running out
-/// only once there is a completed startup to measure from.
-#[cfg(target_os = "macos")]
-fn grace_over(grace_ends_at: Option<Instant>, now: Instant) -> bool {
-    grace_ends_at.is_some_and(|end| now >= end)
 }
 
 /// The attaching path reports the display name, so the launching path has to
@@ -166,9 +101,11 @@ fn result_from_app(app: &AppInfo, window: Option<WindowInfo>) -> LaunchResult {
         pid: app.pid,
         process_instance: app.process_instance.clone(),
         window,
-        cdp: None,
-        renderer,
-        suggestion: None,
+        guidance: LaunchGuidance {
+            renderer,
+            ..LaunchGuidance::default()
+        },
+        disposition: LaunchArrival::Attached.facts().disposition(),
     }
 }
 
@@ -177,6 +114,7 @@ fn result_from_launched(
     launched: &(i32, String),
     window: Option<WindowInfo>,
     id: &str,
+    facts: LaunchFacts,
 ) -> Result<LaunchResult, AdapterError> {
     let renderer = crate::system::renderer_kind::detect_chromium(launched.0);
     Ok(LaunchResult {
@@ -185,9 +123,11 @@ fn result_from_launched(
             .map_err(|_| AdapterError::internal("Launched process identifier is out of range"))?,
         process_instance: Some(launched.1.clone()),
         window,
-        cdp: None,
-        renderer,
-        suggestion: None,
+        guidance: LaunchGuidance {
+            renderer,
+            ..LaunchGuidance::default()
+        },
+        disposition: facts.disposition(),
     })
 }
 
@@ -202,26 +142,62 @@ pub(crate) fn launch_app_impl(
 
 #[cfg(target_os = "macos")]
 fn launch_target(
-    options: &LaunchOptions,
+    launch_plan: LaunchPlan,
     mut initial: Vec<AppInfo>,
 ) -> Result<LaunchTarget, AdapterError> {
-    if options.attach_if_running {
-        if initial.len() > 1 {
-            return Err(ambiguous_apps(&initial));
-        }
-        if let Some(app) = initial.pop() {
-            let process_instance = required_instance(&app)?;
-            return Ok(LaunchTarget::Existing {
-                pid: super::process::process_identity::to_pid_t(app.pid)?,
-                process_instance,
-            });
-        }
+    if !matches!(launch_plan, LaunchPlan::Activate | LaunchPlan::Forward) {
+        return Ok(LaunchTarget::New {
+            baseline_instances: initial
+                .iter()
+                .map(required_instance)
+                .collect::<Result<Vec<_>, _>>()?,
+        });
     }
-    let baseline_instances = initial
-        .iter()
-        .map(required_instance)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(LaunchTarget::New { baseline_instances })
+    let app = initial
+        .pop()
+        .ok_or_else(|| AdapterError::internal("An attach plan had no running application"))?;
+    let process_instance = required_instance(&app)?;
+    let pid = super::process::process_identity::to_pid_t(app.pid)?;
+    Ok(if launch_plan == LaunchPlan::Forward {
+        LaunchTarget::Forwarded {
+            pid,
+            process_instance,
+        }
+    } else {
+        LaunchTarget::Existing {
+            pid,
+            process_instance,
+        }
+    })
+}
+
+/// The refusal for plain arguments aimed at an instance that is already
+/// running. Process arguments reach an application only as it starts, so
+/// nothing is sent and the caller learns which arguments could not travel.
+#[cfg(target_os = "macos")]
+fn arguments_cannot_reach(id: &str, arguments: &LaunchArguments) -> AdapterError {
+    AdapterError::new(
+        ErrorCode::ActionFailed,
+        format!("'{id}' is already running and its arguments can only reach a new process"),
+    )
+    .with_details(serde_json::json!({ "arguments": arguments.plain }))
+    .with_suggestion(
+        "Pass only paths of existing files to open them in the running instance, or close the running instance and launch again.",
+    )
+    .with_disposition(DeliverySemantics::not_delivered())
+}
+
+#[cfg(target_os = "macos")]
+fn target_facts(target: &LaunchTarget) -> LaunchFacts {
+    match target {
+        LaunchTarget::Existing { .. } => LaunchFacts {
+            attached: true,
+            activation_dispatched: true,
+            postcondition_observed: false,
+        },
+        LaunchTarget::Forwarded { .. } => LaunchArrival::Forwarded.facts(),
+        LaunchTarget::New { .. } => LaunchArrival::Spawned.facts(),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -231,6 +207,10 @@ fn validate_launched_target(
 ) -> Result<(), AdapterError> {
     match target {
         LaunchTarget::Existing {
+            pid,
+            process_instance,
+        }
+        | LaunchTarget::Forwarded {
             pid,
             process_instance,
         } => {
